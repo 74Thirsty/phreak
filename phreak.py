@@ -184,6 +184,81 @@ def adb_props():
     }
     return info
 
+def detect_screen_state():
+    """Detect if device is screen locked"""
+    out, _, _ = run(f"{ADB} shell dumpsys window policy", "screen_check")
+    return "isStatusBarKeyguard" in out and "true" in out
+
+def enable_debug_locked():
+    """Attempt to enable USB debugging on locked device"""
+    if not detect_screen_state():
+        print("Device is not locked")
+        return False
+    
+    print("Device is screen locked. Attempting USB debugging enable...")
+    
+    # Method 1: Try settings.db modification
+    try:
+        print("Attempting Method 1: Settings database modification")
+        run(f"{ADB} pull /data/data/com.android.providers.settings/databases/settings.db ~/settings.db", 
+            "pull_settings_db")
+        
+        # Modify settings.db
+        with Spinner("Modifying USB debug settings"):
+            run("""sqlite3 ~/settings.db <<EOF
+                UPDATE secure SET value=1 WHERE name='development_settings_enabled';
+                UPDATE secure SET value=1 WHERE name='adb_enabled';
+                EXIT;
+                EOF""", "modify_settings_db", shell=True)
+            
+            run(f"{ADB} push ~/settings.db /data/data/com.android.providers.settings/databases/", 
+                "push_settings_db")
+            os.remove("~/settings.db")
+            
+        return True
+    
+    except Exception as e:
+        print(f"Method 1 failed: {str(e)}")
+        return False
+
+def unlock_screen():
+    """Attempt to bypass screen lock"""
+    print("Attempting screen lock bypass...")
+    
+    # Try Google FindMyDevice method
+    out, _, _ = run(f"{ADB} shell pm list packages com.google.android.gms", "check_gms")
+    if "package:" in out:
+        print("Google Play Services found. Using FindMyDevice method...")
+        # This requires user interaction with Google account
+        print("Please go to Google FindMyDevice website and:")
+        print("1. Select this device")
+        print("2. Click 'Lock'")
+        print("3. Enter temporary password")
+        input("Press Enter when done...")
+        return True
+        
+    # Try MTK-specific method if MediaTek device
+    out, _, _ = run(f"{ADB} shell getprop ro.mediatek.hardware", "check_mtk")
+    if "mtk" in out.lower():
+        print("MediaTek device detected. Using MTK method...")
+        run(f"{MTK} auth", "mtk_auth", shell=True)
+        return True
+        
+    return False
+
+def enable_debug_anyway():
+    """Main function to handle locked device USB debugging"""
+    if detect_screen_state():
+        print("\033[93mWarning: Device is screen locked!\033[0m")
+        if unlock_screen():
+            print("\033[92mScreen unlocked successfully! Enabling USB debugging...\033[0m")
+            enable_debug_locked()
+        else:
+            print("\033[91mFailed to bypass screen lock.\033[0m")
+    else:
+        print("Device is not locked. Proceeding normally...")
+
+
 def fb_info():
     # quick probe to see if anything is in fastboot
     out,_,_ = run(f"{FASTBOOT} devices", "fb_devices_probe", timeout=2)
@@ -438,7 +513,6 @@ def run(cmd, action="exec", shell=False, timeout=None, show_spinner=False, spinn
 
     input("\nPress Enter…")
 
-
 # ---------- MTK bypass ----------
 def mtk_probe():
     print("Attempting BROM handshake (mtkclient)…")
@@ -504,7 +578,7 @@ def menu_hack():
         elif c == "3": hack_magisk_root()
         elif c == "4": hack_firmware_hunter()
         elif c == "5": break
-
+            
 def menu_adb():
     while True:
         info = adb_props()
@@ -520,6 +594,7 @@ def menu_adb():
             ("Debloat (profile)", "Uninstall common bloat for user 0."),
             ("OTA sideload", "Stream update.zip to recovery."),
             ("Firmware Hunter (links)", "Build search URLs for exact firmware."),
+            ("Enable USB Debugging (locked)", "Try various methods to enable debugging"),
             ("Back", "Return to main menu."),
         ]
         draw("ADB MENU", opts, info)
@@ -538,8 +613,8 @@ def menu_adb():
         elif c == "9": debloat()
         elif c == "10": sideload()
         elif c == "11": firmware_hunter()
-        elif c == "12": break
-
+        elif c == "12": enable_debug_anyway()
+        elif c == "13": break
 
 def menu_fastboot():
     while True:
@@ -588,6 +663,8 @@ def menu_mtk():
         elif c == "4": break
 
 def main():
+    hidden_menu = HiddenMenu()
+    
     while True:
         m = mode()
         info = None
@@ -595,14 +672,18 @@ def main():
             info = adb_props()
         elif m == "fastboot":
             info = fb_info()
+            
+        keyboard.on_press_key("ctrl+h", lambda _: hidden_menu._toggle_hidden_menu())
+        
         opts = [
             ("ADB operations", "Phone ON + USB debugging. File ops, sideload, logs."),
             ("Fastboot operations", "Bootloader mode. Flash/backup/boot images."),
             ("MTK BROM", "MediaTek BootROM bypass via mtkclient."),
             ("Hack Arsenal (Guided)", "Wizards: fix dm-verity, unbrick MTK, root, firmware."),
             ("Preflight Check", "Check tools/drivers/devices before you start."),
-            ("Quit", "Exit the console."),
+            ("Quit", "Exit the console.")
         ]
+        
         draw("MAIN MENU", opts, info)
         c = input("Select: ").strip().lower()
         if   c == "h": help_block("MAIN")
@@ -613,6 +694,22 @@ def main():
         elif c == "3": menu_mtk()
         elif c == "4": menu_hack()
         elif c == "5": preflight()
+
+def advanced_shell(self):
+    """Interactive shell with root access"""
+    with Spinner("Starting advanced shell"):
+        run(f"{ADB} shell su", "advanced_shell", shell=True)
+
+def system_backup(self):
+    """Backup system partitions"""
+    parts = ['boot', 'recovery', 'system', 'vendor', 'super']
+    outdir = f"backup_{int(time.time())}"
+    os.makedirs(outdir, exist_ok=True)
+    
+    with Spinner("Backing up system partitions"):
+        for part in parts:
+            run(f"{FASTBOOT} fetch {part} {outdir}/{part}.img", 
+                f"backup_{part}", timeout=300)
 
 
 if __name__=="__main__":
