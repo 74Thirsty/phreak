@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # PHREAK v4 — full Android Operator Console with Hack Arsenal
-
-import os, sys, shlex, subprocess, time, json, glob, re
+# Author: Chris Hirschauer
+import os, sys, shlex, subprocess, time, json, glob, re, shutil
 from datetime import datetime
 from pathlib import Path
 
 ADB = "adb"
 FASTBOOT = "fastboot"
-MTK = "python3 mtk"                    # mtkclient entry (adjust path if needed)
+MTK = "python3 " + str(Path.home() / "Apps/mtkclient/mtk")
 LOG_FILE = Path.home() / "phreak_tool.log.jsonl"
 LAST = ""  # persists on-screen
 
@@ -50,6 +50,81 @@ def run(cmd, action="exec", shell=False, timeout=None, show_spinner=False, spinn
 
     finally:
         if sp: sp.stop()
+
+from rich.live import Live
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.console import Console
+import threading, time, sys
+
+console = Console()
+
+class Spinner:
+    def __init__(self, text="working...", transient=True, fallback=True):
+        self.text = text
+        self.transient = transient
+        self.fallback = fallback
+        self.progress = None
+        self.live = None
+        self.task_id = None
+        self._running = False
+        self._thread = None
+
+    def _build(self):
+        self.progress = Progress(
+            SpinnerColumn("dots"),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+            transient=self.transient,
+        )
+        self.live = Live(self.progress, console=console, refresh_per_second=12)
+
+    def start(self, text=None):
+        if text:
+            self.text = text
+        try:
+            self._build()
+            self.live.__enter__()
+            self.task_id = self.progress.add_task(self.text, total=None)
+            self._running = True
+            # Background refresher
+            self._thread = threading.Thread(target=self._keepalive, daemon=True)
+            self._thread.start()
+        except Exception as e:
+            if self.fallback:
+                sys.stdout.write(f"[spinner] {self.text}...\n")
+                sys.stdout.flush()
+
+    def _keepalive(self):
+        # Keep description fresh
+        while self._running and self.progress and self.task_id is not None:
+            self.progress.update(self.task_id, description=self.text)
+            time.sleep(0.2)
+
+    def update(self, text):
+        """Update the message shown beside the spinner."""
+        self.text = text
+
+    def stop(self, final=None, success=True):
+        """Stop spinner; optionally print final message."""
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=0.5)
+        try:
+            if self.progress and self.task_id is not None:
+                if final:
+                    style = "green" if success else "red"
+                    self.progress.update(self.task_id, description=f"[{style}]{final}")
+                self.live.__exit__(None, None, None)
+        except Exception as e:
+            if self.fallback:
+                sys.stdout.write(f"[spinner stopped] {final or self.text}\n")
+
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.stop(success=(exc_type is None))
 
 
 # ---------- UI ----------
@@ -254,6 +329,116 @@ def firmware_hunter():
     for u in urls: print("  →", u)
     print("\n⚠️ boot.img + super/vendor/system + vbmeta must match the SAME build.")
 
+def preflight():
+    print("\n\033[96mPreflight checks\033[0m")
+
+    tools = {
+        "adb": (
+            "adb",
+            "sudo apt-get install -y adb"
+        ),
+        "fastboot": (
+            "fastboot",
+            "sudo apt-get install -y fastboot"
+        ),
+        "avbtool": (
+            "avbtool",
+            "python3 -m pip install --user avbtool"
+        ),
+        "mtk": (
+            "mtk",
+            "git clone https://github.com/bkerler/mtkclient.git ~/Apps/mtkclient && "
+            "cd ~/Apps/mtkclient && python3 -m pip install --user -r requirements.txt"
+        ),
+    }
+
+    for name, (binary, install_cmd) in tools.items():
+        path = shutil.which(binary)
+        if path:
+            print(f" • {name}: {path}")
+        else:
+            print(f" • {name}: \033[91mMISSING\033[0m — attempting install…")
+            out, err, code = run(install_cmd, action=f"install_{name}", shell=True, timeout=300)
+            if code == 0:
+                print(f"   ✅ {name} installed successfully")
+            else:
+                print(f"   ❌ {name} install failed (exit {code})")
+                if err:
+                    print(f"     stderr: {err.splitlines()[-1]}")
+
+def run(cmd, action="exec", shell=False, timeout=None, show_spinner=False, spinner_text=None):
+    global LAST
+    sp = None
+    try:
+        # Start spinner if enabled
+        if show_spinner:
+            sp = Spinner(spinner_text or f"{action}…")
+            sp.start()
+
+        if shell:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                shell=True,
+                timeout=timeout,
+            )
+        else:
+            proc = subprocess.run(
+                shlex.split(cmd),
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+
+        out, err, code = proc.stdout.strip(), proc.stderr.strip(), proc.returncode
+        log_event(action, cmd, out, err, code)
+
+        FIRST = (out.splitlines()[0] if out else "") or (err.splitlines()[0] if err else "")
+        LAST = f"[{action}] exit={code} :: {FIRST}"
+
+        # Report result through spinner
+        if sp:
+            if code == 0:
+                sp.stop(final=f"{action} ok", success=True)
+            else:
+                sp.stop(final=f"{action} failed", success=False)
+
+        return out, err, code
+
+    except subprocess.TimeoutExpired:
+        LAST = f"[{action}] timeout"
+        log_event(action, cmd, "", "timeout", 124)
+        if sp: sp.stop(final=f"{action} timeout", success=False)
+        return "", "timeout", 124
+
+    except FileNotFoundError:
+        LAST = f"[{action}] missing binary: {cmd.split()[0]}"
+        log_event(action, cmd, "", LAST, 127)
+        if sp: sp.stop(final=f"{action} missing", success=False)
+        return "", LAST, 127
+
+    finally:
+        if sp and sp._running:  # just in case
+            sp.stop()
+
+
+    # --- Post-checks ---
+    out, _, _ = run("lsusb", "lsusb", shell=True)
+    if "0e8d:" in out:
+        print(" • MTK device present (0e8d).")
+
+    out, _, _ = run(f"{ADB} devices", "adb_devices")
+    if "device" in out.split():
+        print(" • ADB device connected.")
+
+    out, _, _ = run(f"{FASTBOOT} devices", "fb_devices")
+    if "fastboot" in out:
+        print(" • Fastboot device connected.")
+
+    input("\nPress Enter…")
+
+
 # ---------- MTK bypass ----------
 def mtk_probe():
     print("Attempting BROM handshake (mtkclient)…")
@@ -270,55 +455,91 @@ def hack_brom_bypass(): mtk_probe()
 def hack_magisk_root(): auto_root_magisk()
 def hack_firmware_hunter(): firmware_hunter()
 
-def menu_hack():
-    while True:
-        opts=[
-            "Patch + Flash VBMETA (disable verity)",
-            "BROM Bypass (mtkclient)",
-            "Magisk Auto-Root",
-            "Firmware Hunter",
-            "Back"
-        ]
-        draw("HACK ARSENAL", opts)
-        c=input("Select: ").strip()
-        if   c=="1": hack_vbmeta()
-        elif c=="2": hack_brom_bypass()
-        elif c=="3": hack_magisk_root()
-        elif c=="4": hack_firmware_hunter()
-        elif c=="5": break
 
 # ---------- Menus ----------
+def help_block(topic):
+    HELP = {
+        "MAIN": """Select a mode based on how the phone is connected:
+- ADB ops: phone is ON with USB debugging (adb devices shows 'device').
+- Fastboot ops: phone in bootloader (fastboot devices shows a serial).
+- MTK BROM: MediaTek BootROM bypass (mtkclient), used when SPFT asks for .auth.
+- Hack Arsenal: guided flows (fix dm-verity, root, etc.).""",
+        "ADB": """Common paths:
+- Remote path usually /sdcard/Download/  (writable without root)
+- /data/local/tmp/ is a staging area (writable via adb)
+- 'Push file (smart)' installs APKs automatically after push.
+- 'OTA sideload' requires stock recovery + an update.zip.""",
+        "FASTBOOT": """Flashing writes directly to partitions. Triple-check file/partition:
+- vbmeta: Verified Boot metadata (patch to disable verity).
+- super: dynamic partitions container (system/vendor/product).
+- boot: kernel+ramdisk (can be Magisk-patched).
+Type FLASH when prompted to execute risky writes.""",
+        "MTK": """BROM steps:
+1) Power OFF phone.
+2) Hold Vol+ and Vol- (or testpoint) and plug USB.
+3) Run 'Probe BROM' to verify handshake (requires mtkclient).
+If SP Flash Tool asks for .auth, use BROM bypass instead.""",
+        "HACK": """Guided flows:
+- Patch+Flash VBMETA: disables dm-verity/verification.
+- BROM Bypass: talks to BootROM to skip .auth.
+- Magisk Auto-Root: push stock boot.img -> patch in Magisk -> pull/flash.
+- Firmware Hunter: builds search links for the exact fingerprint/codename."""
+    }
+    print("\n\033[96m[HELP]\033[0m " + HELP.get(topic, "No help for this section.") + "\n")
+    input("Press Enter…")
+
+def menu_hack():
+    while True:
+        opts = [
+            ("Patch + Flash VBMETA", "Disable verity/verification (fix dm-verity)"),
+            ("BROM Bypass", "Confirm BootROM handshake (bypass .auth)"),
+            ("Magisk Auto-Root", "Patch boot with Magisk then flash"),
+            ("Firmware Hunter", "Find matching firmware builds"),
+            ("Back", "Return to main menu")
+        ]
+        draw("HACK ARSENAL", opts)
+        c = input("Select: ").strip()
+        if c == "1": hack_vbmeta()
+        elif c == "2": hack_brom_bypass()
+        elif c == "3": hack_magisk_root()
+        elif c == "4": hack_firmware_hunter()
+        elif c == "5": break
+
 def menu_adb():
     while True:
-        info=adb_props()
-        opts=[
-            "Device profiler (JSON)",
-            "Shell",
-            "Reboot",
-            "Reboot to bootloader",
-            "Push file (smart default)",
-            "Batch push directory",
-            "Install APK (manual path)",
-            "Logcat (live)",
-            "Debloat (profile)",
-            "OTA sideload",
-            "Firmware Hunter (links)",
-            "Back"
+        info = adb_props()
+        opts = [
+            ("Device profiler (JSON)", "Show brand/model/codename/build/patch."),
+            ("Shell", "Open interactive adb shell on the phone."),
+            ("Reboot", "Reboot Android normally."),
+            ("Reboot to bootloader", "Switch to fastboot mode."),
+            ("Push file (smart default)", "Push to /sdcard/Download/. APKs auto-install."),
+            ("Batch push directory", "Push all files from a local folder."),
+            ("Install APK (manual path)", "Install APK from local path via adb."),
+            ("Logcat (live)", "Live logs; Ctrl+C to stop."),
+            ("Debloat (profile)", "Uninstall common bloat for user 0."),
+            ("OTA sideload", "Stream update.zip to recovery."),
+            ("Firmware Hunter (links)", "Build search URLs for exact firmware."),
+            ("Back", "Return to main menu."),
         ]
         draw("ADB MENU", opts, info)
-        c=input("Select: ").strip()
-        if   c=="1": print(json.dumps(info,indent=2)); input("Enter to continue…")
-        elif c=="2": os.system(f"{ADB} shell")
-        elif c=="3": run(f"{ADB} reboot","adb_reboot")
-        elif c=="4": run(f"{ADB} reboot bootloader","adb_reboot_bl"); return
-        elif c=="5": adb_push_smart()
-        elif c=="6": adb_batch_push()
-        elif c=="7": apk=input("APK path: ").strip(); run(f"{ADB} install -r {shlex.quote(apk)}","adb_install")
-        elif c=="8": logcat()
-        elif c=="9": debloat()
-        elif c=="10": sideload()
-        elif c=="11": firmware_hunter()
-        elif c=="12": break
+        c = input("Select: ").strip().lower()
+        if   c == "h": help_block("ADB")
+        elif c == "b": break
+        elif c == "q": sys.exit(0)
+        elif c == "1": print(json.dumps(info, indent=2)); input("Enter…")
+        elif c == "2": os.system(f"{ADB} shell")
+        elif c == "3": run(f"{ADB} reboot", "adb_reboot")
+        elif c == "4": run(f"{ADB} reboot bootloader", "adb_reboot_bl"); return
+        elif c == "5": adb_push_smart()
+        elif c == "6": adb_batch_push()
+        elif c == "7": apk = input("APK path: ").strip(); run(f"{ADB} install -r {shlex.quote(apk)}", "adb_install")
+        elif c == "8": print("Ctrl+C to stop…"); os.system(f"{ADB} logcat")
+        elif c == "9": debloat()
+        elif c == "10": sideload()
+        elif c == "11": firmware_hunter()
+        elif c == "12": break
+
 
 def menu_fastboot():
     while True:
@@ -368,18 +589,31 @@ def menu_mtk():
 
 def main():
     while True:
-        m=mode()
-        opts=["ADB operations","Fastboot operations","MTK BROM","Hack Arsenal","Quit"]
-        info=None
-        if m=="adb": info=adb_props()
-        elif m=="fastboot": info=fb_info()
+        m = mode()
+        info = None
+        if m == "adb":
+            info = adb_props()
+        elif m == "fastboot":
+            info = fb_info()
+        opts = [
+            ("ADB operations", "Phone ON + USB debugging. File ops, sideload, logs."),
+            ("Fastboot operations", "Bootloader mode. Flash/backup/boot images."),
+            ("MTK BROM", "MediaTek BootROM bypass via mtkclient."),
+            ("Hack Arsenal (Guided)", "Wizards: fix dm-verity, unbrick MTK, root, firmware."),
+            ("Preflight Check", "Check tools/drivers/devices before you start."),
+            ("Quit", "Exit the console."),
+        ]
         draw("MAIN MENU", opts, info)
-        c=input("Select: ").strip()
-        if   c=="1": menu_adb()
-        elif c=="2": menu_fastboot()
-        elif c=="3": menu_mtk()
-        elif c=="4": menu_hack()
-        elif c=="5": print("Later."); sys.exit(0)
+        c = input("Select: ").strip().lower()
+        if   c == "h": help_block("MAIN")
+        elif c == "q" or c == "6": sys.exit(0)
+        elif c == "b": continue
+        elif c == "1": menu_adb()
+        elif c == "2": menu_fastboot()
+        elif c == "3": menu_mtk()
+        elif c == "4": menu_hack()
+        elif c == "5": preflight()
+
 
 if __name__=="__main__":
     main()
