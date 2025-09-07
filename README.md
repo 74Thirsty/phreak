@@ -1,11 +1,14 @@
 ![Sheen Banner](https://raw.githubusercontent.com/74Thirsty/74Thirsty/main/assets/phreak.svg)
+
+
+
 <a href="#"><img src="https://img.shields.io/badge/Built%20with-PyCharm-8fbad9?logo=pycharm&logoColor=black&labelColor=7bafd4"></a>
 <a href="#"><img src="https://img.shields.io/badge/Python-3.10_|_3.11_|_3.12-b7d0e3?logo=python&logoColor=black&labelColor=a3c5de"></a>
 <a href="#"><img src="https://img.shields.io/badge/Solidity-0.8.20_|_0.8.28-dfe7ed?logo=ethereum&logoColor=black&labelColor=cbdce8"></a>
 <a href="#"><img src="https://img.shields.io/badge/Flashbots-MEV%20Bundle-b7d0e3?logo=thunderbird&logoColor=black&labelColor=cbdce8"></a>
 <a href="#"><img src="https://img.shields.io/badge/Ephemeral-Contracts-7bafd4?logo=nodedotjs&logoColor=black&labelColor=8fbad9"></a>
 
----
+
 PHREAK v4 is a comprehensive Android operator console that provides a unified interface for various Android device management tasks. This tool combines multiple functionalities into a structured menu-driven system, allowing users to perform everything from basic device operations to advanced modifications.
 
 ### Core Architecture
