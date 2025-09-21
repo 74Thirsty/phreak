@@ -2,8 +2,13 @@
 # PHREAK v4 — full Android Operator Console with Hack Arsenal
 # Author: Chris Hirschauer
 import os, sys, shlex, subprocess, time, json, glob, re, shutil
+import importlib
+import importlib.util
 from datetime import datetime
 from pathlib import Path
+
+keyboard_spec = importlib.util.find_spec("keyboard")
+keyboard = importlib.import_module("keyboard") if keyboard_spec else None
 
 ADB = "adb"
 FASTBOOT = "fastboot"
@@ -662,19 +667,84 @@ def menu_mtk():
         elif c == "3": break
         elif c == "4": break
 
+class HiddenMenu:
+    def __init__(self, hotkey_module=None):
+        self._pending = False
+        self._lock = threading.Lock()
+        self._hotkey_registered = False
+        if hotkey_module is not None:
+            try:
+                hotkey_module.on_press_key("ctrl+h", lambda _: self._schedule_show())
+                self._hotkey_registered = True
+            except Exception:
+                self._hotkey_registered = False
+
+    def _schedule_show(self):
+        with self._lock:
+            if self._pending:
+                return
+            self._pending = True
+        print("\n[hidden] Hidden menu requested. Complete the current selection to view it.")
+
+    def maybe_show(self):
+        with self._lock:
+            if not self._pending:
+                return
+            self._pending = False
+        self._show_menu()
+
+    def open_menu(self):
+        self._show_menu()
+
+    def _show_menu(self):
+        opts = [
+            ("Advanced shell (root)", "Launch an interactive adb shell with su."),
+            ("System backup (fastboot)", "Fetch boot/recovery/system/vendor/super via fastboot."),
+            ("Back", "Return to the previous menu."),
+        ]
+        while True:
+            draw("HIDDEN OPS", opts)
+            choice = input("Select: ").strip().lower()
+            if choice in {"3", "b", "q"}:
+                break
+            if choice == "1":
+                self.advanced_shell()
+            elif choice == "2":
+                self.system_backup()
+
+    def advanced_shell(self):
+        """Interactive shell with root access"""
+        with Spinner("Starting advanced shell"):
+            run(f"{ADB} shell su", "advanced_shell", shell=True)
+
+    def system_backup(self):
+        """Backup system partitions"""
+        parts = ['boot', 'recovery', 'system', 'vendor', 'super']
+        outdir = f"backup_{int(time.time())}"
+        os.makedirs(outdir, exist_ok=True)
+
+        with Spinner("Backing up system partitions"):
+            for part in parts:
+                run(
+                    f"{FASTBOOT} fetch {part} {outdir}/{part}.img",
+                    f"backup_{part}",
+                    timeout=300,
+                )
+        print(f"Backups saved to {outdir}")
+
+
 def main():
-    hidden_menu = HiddenMenu()
-    
+    hidden_menu = HiddenMenu(keyboard)
+
     while True:
+        hidden_menu.maybe_show()
         m = mode()
         info = None
         if m == "adb":
             info = adb_props()
         elif m == "fastboot":
             info = fb_info()
-            
-        keyboard.on_press_key("ctrl+h", lambda _: hidden_menu._toggle_hidden_menu())
-        
+
         opts = [
             ("ADB operations", "Phone ON + USB debugging. File ops, sideload, logs."),
             ("Fastboot operations", "Bootloader mode. Flash/backup/boot images."),
@@ -694,22 +764,7 @@ def main():
         elif c == "3": menu_mtk()
         elif c == "4": menu_hack()
         elif c == "5": preflight()
-
-def advanced_shell(self):
-    """Interactive shell with root access"""
-    with Spinner("Starting advanced shell"):
-        run(f"{ADB} shell su", "advanced_shell", shell=True)
-
-def system_backup(self):
-    """Backup system partitions"""
-    parts = ['boot', 'recovery', 'system', 'vendor', 'super']
-    outdir = f"backup_{int(time.time())}"
-    os.makedirs(outdir, exist_ok=True)
-    
-    with Spinner("Backing up system partitions"):
-        for part in parts:
-            run(f"{FASTBOOT} fetch {part} {outdir}/{part}.img", 
-                f"backup_{part}", timeout=300)
+        elif c == "hidden": hidden_menu.open_menu()
 
 
 if __name__=="__main__":
