@@ -11,6 +11,8 @@
 
 PHREAK v4 is a comprehensive Android operator console that provides a unified interface for various Android device management tasks. This tool combines multiple functionalities into a structured menu-driven system, allowing users to perform everything from basic device operations to advanced modifications.
 
+> **Looking toward PHREAK v5?** A full control-tower blueprint that extends the red/green/blue layering into multi-device orchestration, forensic safety rails, cloud control planes, and plugin-driven extensibility now lives in [`docs/PHREAK_v5_architecture.md`](docs/PHREAK_v5_architecture.md).
+
 ### Core Architecture
 
 The tool operates through several interconnected layers:
