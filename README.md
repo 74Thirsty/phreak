@@ -13,6 +13,17 @@ PHREAK v4 is a comprehensive Android operator console that provides a unified in
 
 > **Looking toward PHREAK v5?** A full control-tower blueprint that extends the red/green/blue layering into multi-device orchestration, forensic safety rails, cloud control planes, and plugin-driven extensibility now lives in [`docs/PHREAK_v5_architecture.md`](docs/PHREAK_v5_architecture.md).
 
+### PHREAK v5 Control Tower Package
+
+The repository now includes a `phreak_v5` Python package that converts the v5 architecture blueprint into code. The package wires together red/green/blue layers with telemetry and auditing so downstream interfaces can share a common control plane.
+
+* **Core layer (`phreak_v5.core`)** &mdash; connection matrix, policy engine, command router, audit logging, and a pluggable secret vault.
+* **Operator services (`phreak_v5.services`)** &mdash; device graph orchestrator, forensics hub, firmware store, backup scheduler, heuristic ML diagnostics, and a JSON-manifest plugin runtime.
+* **Presentation surfaces (`phreak_v5.presentation`)** &mdash; stubs for a curses control room, web cockpit state exporter, automation API facade, and observability metrics collector.
+* **Orchestrator (`phreak_v5.PhreakControlTower`)** &mdash; high-level façade that instantiates all subsystems, exposes helper methods for device registration, job dispatch, secrets, firmware ingestion, backups, and forensics collection.
+
+This scaffolding is intentionally light on platform-specific logic so it can evolve alongside the blueprint while still providing working telemetry, logging, and storage primitives for experimentation.
+
 ### Core Architecture
 
 The tool operates through several interconnected layers:
