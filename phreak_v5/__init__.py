@@ -11,9 +11,19 @@ from .core.logging import AuditLoggingKernel
 from .core.policy import PolicyEngine, PolicyRule
 from .core.router import CommandRouter
 from .core.vault import SecurityVault
-from .models import CommandRequest, Device, DeviceBatch, PolicyContext
+from .models import (
+    CommandRequest,
+    Device,
+    DeviceBatch,
+    DeviceLookupResult,
+    DeviceStatus,
+    EnrolledDevice,
+    LocationFix,
+    PolicyContext,
+)
 from .services.backup import BackupSyncEngine
 from .services.device_graph import DeviceGraphOrchestrator
+from .services.enrollment import DeviceRegistry
 from .services.firmware import FirmwareSuite
 from .services.forensics import ForensicsHub
 from .services.ml import MLDiagnostics
@@ -31,6 +41,7 @@ class ControlTowerComponents:
     audit_log: AuditLoggingKernel
     vault: SecurityVault
     device_graph: DeviceGraphOrchestrator
+    device_registry: DeviceRegistry
     forensics_hub: ForensicsHub
     firmware_suite: FirmwareSuite
     backup_engine: BackupSyncEngine
@@ -78,6 +89,9 @@ class PhreakControlTower:
         self.device_graph = DeviceGraphOrchestrator(
             telemetry=self.telemetry, audit_log=self.audit_log
         )
+        self.device_registry = DeviceRegistry(
+            telemetry=self.telemetry,
+        )
         self.forensics_hub = ForensicsHub(
             audit_log=self.audit_log,
             telemetry=self.telemetry,
@@ -107,6 +121,7 @@ class PhreakControlTower:
             audit_log=self.audit_log,
             vault=self.vault,
             device_graph=self.device_graph,
+            device_registry=self.device_registry,
             forensics_hub=self.forensics_hub,
             firmware_suite=self.firmware_suite,
             backup_engine=self.backup_engine,
@@ -122,9 +137,37 @@ class PhreakControlTower:
             self.connection_matrix.register_device(device)
             self.device_graph.register_device(device)
 
+    def register_enrolled_device(
+        self,
+        enrolled_device: EnrolledDevice,
+        *,
+        connection: Optional[Device] = None,
+    ) -> None:
+        """Register an enrolled device and optionally its live connection info."""
+
+        stored = self.device_registry.register_device(enrolled_device)
+        if connection:
+            if connection.device_id != stored.device_id:
+                raise ValueError("connection device_id must match enrolled device")
+            self.connection_matrix.register_device(connection)
+            self.device_graph.register_device(connection)
+
     def remove_device(self, device_id: str) -> None:
         self.connection_matrix.unregister_device(device_id)
         self.device_graph.remove_device(device_id)
+        self.device_registry.unregister_device(device_id)
+
+    # -- Enrollment lookups ----------------------------------------------
+    def locate_device_by_phone(self, phone_number: str) -> DeviceLookupResult:
+        return self.device_registry.locate_device(phone_number)
+
+    def update_enrolled_device_location(
+        self, device_id: str, location: LocationFix
+    ) -> None:
+        self.device_registry.update_location(device_id, location)
+
+    def update_enrolled_device_status(self, device_id: str, status: DeviceStatus) -> None:
+        self.device_registry.update_status(device_id, status)
 
     # -- Command dispatch -------------------------------------------------
     async def dispatch(self, request: CommandRequest) -> None:

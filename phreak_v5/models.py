@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum
-from typing import Dict, Iterable, Mapping, MutableMapping, Optional, Sequence
+from typing import Dict, Iterable, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 
 class DeviceStatus(str, Enum):
@@ -41,6 +41,76 @@ class DeviceBatch:
 
     device_ids: Sequence[str] = field(default_factory=tuple)
     tags: Sequence[str] = field(default_factory=tuple)
+
+
+@dataclass(slots=True)
+class LocationFix:
+    """GPS fix captured from a managed device."""
+
+    latitude: float
+    longitude: float
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+
+    def to_tuple(self) -> Tuple[float, float, datetime]:
+        return self.latitude, self.longitude, self.timestamp
+
+
+@dataclass(slots=True)
+class EnrolledDevice:
+    """Metadata describing an enrolled device tracked by the control tower."""
+
+    device_id: str
+    phone_number: str
+    imei: Optional[str] = None
+    alias: Optional[str] = None
+    status: DeviceStatus = DeviceStatus.UNKNOWN
+    last_known_location: Optional[LocationFix] = None
+    metadata: Mapping[str, str] = field(default_factory=dict)
+
+    def with_phone_number(self, phone_number: str) -> "EnrolledDevice":
+        return replace(self, phone_number=phone_number)
+
+    def update_location(self, location: LocationFix) -> None:
+        self.last_known_location = location
+
+    def update_status(self, status: DeviceStatus) -> None:
+        self.status = status
+
+
+@dataclass(slots=True)
+class DeviceLocationRecord:
+    """Summarised location state for presentation surfaces."""
+
+    device_id: str
+    status: DeviceStatus
+    alias: Optional[str] = None
+    last_known_location: Optional[LocationFix] = None
+
+    @property
+    def map_url(self) -> Optional[str]:
+        if not self.last_known_location:
+            return None
+        return (
+            f"https://maps.google.com/?q={self.last_known_location.latitude},"
+            f"{self.last_known_location.longitude}"
+        )
+
+
+@dataclass(slots=True)
+class DeviceLookupResult:
+    """Result of locating devices by phone number."""
+
+    query: str
+    normalized_phone_number: str
+    matches: Tuple[DeviceLocationRecord, ...] = field(default_factory=tuple)
+
+    @property
+    def has_matches(self) -> bool:
+        return bool(self.matches)
+
+    @property
+    def is_ambiguous(self) -> bool:
+        return len(self.matches) > 1
 
 
 class CommandPriority(Enum):
@@ -166,6 +236,10 @@ __all__ = [
     "Device",
     "DeviceStatus",
     "DeviceBatch",
+    "LocationFix",
+    "EnrolledDevice",
+    "DeviceLocationRecord",
+    "DeviceLookupResult",
     "CommandRequest",
     "CommandPriority",
     "CommandResult",
