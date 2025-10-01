@@ -150,9 +150,14 @@ def banner():
     print("       \033[97mAndroid Operator Console v4 (Hack Arsenal)\033[0m\n")
 
 # change draw signature
-def draw(title, options, info=None, show_last=True):
-    clear(); banner()
-    print(f"\033[96m=== {title} ===\033[0m   (h=help, b=back, q=quit)\n")
+def draw(title, options, info=None, show_last=True, *, first_render=False):
+    if first_render:
+        clear()
+        banner()
+        print(f"\033[96m=== {title} ===\033[0m   (h=help, b=back, q=quit)\n")
+    else:
+        print("\n\033[95m" + "―" * 48 + "\033[0m")
+        print(f"\033[96m=== {title} ===\033[0m   (h=help, b=back, q=quit)\n")
     if info:
         print("\033[93m--- Device Info ---\033[0m")
         for k,v in info.items(): print(f"{k:14}: {v}")
@@ -262,6 +267,90 @@ def enable_debug_anyway():
             print("\033[91mFailed to bypass screen lock.\033[0m")
     else:
         print("Device is not locked. Proceeding normally...")
+
+
+def locate_by_phone_number():
+    """Query contacts on the device for a matching phone number."""
+    raw = input("Enter phone number or fragment: ").strip()
+    if not raw:
+        print("No number provided.")
+        return
+
+    digits = re.sub(r"[^0-9+]", "", raw)
+    if not digits:
+        print("Input did not contain any dialable characters.")
+        return
+
+    like = f"%{digits}%"
+    where_clause = f"\"number LIKE '{like}'\""
+    cmd = (
+        f"{ADB} shell content query --uri content://contacts/phones "
+        "--projection display_name:number --sort order ASC "
+        f"--where {where_clause}"
+    )
+
+    out, err, code = run(cmd, "adb_locate_contact", shell=True)
+    if code != 0:
+        print("Unable to query contacts. Ensure the device is unlocked and USB debugging is allowed.")
+        return
+
+    matches = []
+    for line in out.splitlines():
+        if "display_name=" in line and "number=" in line:
+            parts = dict(
+                kv.split("=", 1) for kv in line.split() if "=" in kv
+            )
+            name = parts.get("display_name", "<unknown>")
+            number = parts.get("number", "<unknown>")
+            matches.append((name, number))
+
+    if not matches:
+        print("No contacts matched that number fragment.")
+        return
+
+    print("\nMatches:")
+    for name, number in matches:
+        print(f" • {name}: {number}")
+
+
+def network_unlock_assistant():
+    """Collect diagnostic info and walk through carrier unlock steps."""
+    print("Gathering radio and SIM lock state…")
+    probes = {
+        "SIM status": "gsm.sim.state",
+        "Carrier": "gsm.operator.alpha",
+        "Network lock": "persist.radio.network_lock",
+        "Service provider": "gsm.sim.operator.alpha",
+        "Bootloader unlocked": "ro.boot.flash.locked",
+    }
+
+    results = {}
+    for label, prop in probes.items():
+        out, _, _ = run(f"{ADB} shell getprop {prop}", f"getprop_{prop}")
+        results[label] = out.strip() or "<unknown>"
+
+    print("\nCurrent device state:")
+    for label, value in results.items():
+        print(f" • {label}: {value}")
+
+    locked_indicators = {"NETWORK_LOCKED", "PERM_DISABLED", "PERSO_LOCKED"}
+    if any(value.upper() in locked_indicators for value in results.values()):
+        print("\nThe device reports an active network lock.")
+    else:
+        print("\nNo explicit network lock detected from getprop output.")
+
+    print("\nNext steps:")
+    print(" 1. Request an unlock code from the original carrier (requires account verification).")
+    print(" 2. Insert a non-accepted SIM and enter the unlock code when prompted.")
+    print(" 3. If no prompt appears, reboot into fastboot and run 'fastboot oem unlock-go' if supported.")
+    print(" 4. Some carriers require remote unlock – contact their support with the IMEI shown below.")
+
+    imei_out, _, _ = run(f"{ADB} shell service call iphonesubinfo 1", "read_imei")
+    if imei_out:
+        print("\nIMEI response:")
+        print(imei_out)
+    else:
+        print("\nCould not read IMEI via service call. Use *#06# on the device instead.")
 
 
 def fb_info():
@@ -484,6 +573,15 @@ def run(cmd, action="exec", shell=False, timeout=None, show_spinner=False, spinn
             else:
                 sp.stop(final=f"{action} failed", success=False)
 
+        if code != 0:
+            if out:
+                preview = "\n".join(out.splitlines()[:10])
+                print(f"\n[{action}] output:\n{preview}\n")
+            if err:
+                preview_err = "\n".join(err.splitlines()[:10])
+                print(f"[{action}] error:\n{preview_err}\n")
+            print(f"[{action}] exited with status {code}")
+
         return out, err, code
 
     except subprocess.TimeoutExpired:
@@ -568,23 +666,28 @@ If SP Flash Tool asks for .auth, use BROM bypass instead.""",
     input("Press Enter…")
 
 def menu_hack():
+    first_render = True
     while True:
         opts = [
             ("Patch + Flash VBMETA", "Disable verity/verification (fix dm-verity)"),
             ("BROM Bypass", "Confirm BootROM handshake (bypass .auth)"),
             ("Magisk Auto-Root", "Patch boot with Magisk then flash"),
             ("Firmware Hunter", "Find matching firmware builds"),
+            ("Network Unlock Assistant", "Check SIM lock state and guided steps"),
             ("Back", "Return to main menu")
         ]
-        draw("HACK ARSENAL", opts)
+        draw("HACK ARSENAL", opts, first_render=first_render)
+        first_render = False
         c = input("Select: ").strip()
         if c == "1": hack_vbmeta()
         elif c == "2": hack_brom_bypass()
         elif c == "3": hack_magisk_root()
         elif c == "4": hack_firmware_hunter()
-        elif c == "5": break
-            
+        elif c == "5": network_unlock_assistant()
+        elif c == "6": break
+
 def menu_adb():
+    first_render = True
     while True:
         info = adb_props()
         opts = [
@@ -600,9 +703,11 @@ def menu_adb():
             ("OTA sideload", "Stream update.zip to recovery."),
             ("Firmware Hunter (links)", "Build search URLs for exact firmware."),
             ("Enable USB Debugging (locked)", "Try various methods to enable debugging"),
+            ("Locate contact by phone number", "Search device contacts for a number fragment."),
             ("Back", "Return to main menu."),
         ]
-        draw("ADB MENU", opts, info)
+        draw("ADB MENU", opts, info, first_render=first_render)
+        first_render = False
         c = input("Select: ").strip().lower()
         if   c == "h": help_block("ADB")
         elif c == "b": break
@@ -619,9 +724,11 @@ def menu_adb():
         elif c == "10": sideload()
         elif c == "11": firmware_hunter()
         elif c == "12": enable_debug_anyway()
-        elif c == "13": break
+        elif c == "13": locate_by_phone_number()
+        elif c == "14": break
 
 def menu_fastboot():
+    first_render = True
     while True:
         # fetch info with an animated spinner
         info = fb_info()
@@ -638,7 +745,8 @@ def menu_fastboot():
             ("Auto-Root (Magisk flow)", "Patch boot with Magisk then flash."),
             ("Back", "Return to main menu."),
         ]
-        draw("FASTBOOT MENU", opts, info)
+        draw("FASTBOOT MENU", opts, info, first_render=first_render)
+        first_render = False
         c = input("Select: ").strip().lower()
         if   c=="1": run(f"{FASTBOOT} devices","fb_devices")
         elif c=="2": run(f"{FASTBOOT} oem unlock","fb_unlock")
@@ -653,6 +761,7 @@ def menu_fastboot():
         elif c=="11": break
 
 def menu_mtk():
+    first_render = True
     while True:
         opts = [
             ("Preflight (drivers/checks)", "Check adb/fastboot/avbtool/mtk and USB state."),
@@ -660,7 +769,13 @@ def menu_mtk():
             ("Write single partition (mtk wl)", "Bypass write boot/recovery/super/vbmeta."),
             ("Back", "Return to main menu."),
         ]
-        draw("MTK BROM MENU", opts, {"hint": "Phone OFF → hold Vol+ and Vol- → plug USB"})
+        draw(
+            "MTK BROM MENU",
+            opts,
+            {"hint": "Phone OFF → hold Vol+ and Vol- → plug USB"},
+            first_render=first_render,
+        )
+        first_render = False
         c = input("Select: ").strip().lower()
         if   c == "1": mtk_probe()
         elif c == "2": mtk_write_single()
@@ -702,8 +817,10 @@ class HiddenMenu:
             ("System backup (fastboot)", "Fetch boot/recovery/system/vendor/super via fastboot."),
             ("Back", "Return to the previous menu."),
         ]
+        first_render = True
         while True:
-            draw("HIDDEN OPS", opts)
+            draw("HIDDEN OPS", opts, first_render=first_render)
+            first_render = False
             choice = input("Select: ").strip().lower()
             if choice in {"3", "b", "q"}:
                 break
@@ -736,6 +853,7 @@ class HiddenMenu:
 def main():
     hidden_menu = HiddenMenu(keyboard)
 
+    first_render = True
     while True:
         hidden_menu.maybe_show()
         m = mode()
@@ -753,8 +871,9 @@ def main():
             ("Preflight Check", "Check tools/drivers/devices before you start."),
             ("Quit", "Exit the console.")
         ]
-        
-        draw("MAIN MENU", opts, info)
+
+        draw("MAIN MENU", opts, info, first_render=first_render)
+        first_render = False
         c = input("Select: ").strip().lower()
         if   c == "h": help_block("MAIN")
         elif c == "q" or c == "6": sys.exit(0)
