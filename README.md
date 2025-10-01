@@ -13,6 +13,39 @@ PHREAK v4 is a comprehensive Android operator console that provides a unified in
 
 > **Looking toward PHREAK v5?** A full control-tower blueprint that extends the red/green/blue layering into multi-device orchestration, forensic safety rails, cloud control planes, and plugin-driven extensibility now lives in [`docs/PHREAK_v5_architecture.md`](docs/PHREAK_v5_architecture.md).
 
+## Installation
+
+PHREAK is distributed as a standard Python package. You can install it in editable mode during development or build a wheel for distribution.
+
+```bash
+python -m pip install --upgrade pip
+pip install .
+```
+
+### Optional extras
+
+- `pip install .[cli]` adds the optional `keyboard` dependency used by the legacy terminal console.
+- `pip install .[vault]` enables strong encryption for the security vault component.
+
+After installation the interactive console is available as:
+
+```bash
+phreak
+```
+
+Running `python -m phreak` is equivalent and launches the same console experience.
+
+## Docker image
+
+The repository ships with a lightweight Dockerfile for environments where installing Python tooling directly is undesirable.
+
+```bash
+docker build -t phreak:latest .
+docker run --rm -it phreak:latest
+```
+
+The image installs the package and exposes the `phreak` entry point as its default command. Mount your host USB devices into the container when interacting with hardware targets.
+
 ### PHREAK v5 Control Tower Package
 
 The repository now includes a `phreak_v5` Python package that converts the v5 architecture blueprint into code. The package wires together red/green/blue layers with telemetry and auditing so downstream interfaces can share a common control plane.

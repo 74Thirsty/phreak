@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "phreak"
+version = "0.1.0"
+description = "Android operator console and PHREAK v5 control tower toolkit"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Chris Hirschauer" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: Other/Proprietary License",
+    "Intended Audience :: Developers",
+    "Topic :: System :: Operating System",
+]
+dependencies = [
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+cli = ["keyboard>=0.13.5"]
+vault = ["cryptography>=41.0"]
+
+[project.scripts]
+phreak = "phreak_cli:main"
+
+[project.urls]
+Homepage = "https://github.com/74Thirsty/phreak"
+Documentation = "https://github.com/74Thirsty/phreak/tree/main/docs"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra"
+testpaths = ["tests"]
