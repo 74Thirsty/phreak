@@ -6,6 +6,7 @@ from .firmware import FirmwareSuite
 from .forensics import ForensicsHub
 from .ml import MLDiagnostics
 from .plugins import PluginRuntime
+from .unlock import UnlockCodeBreakdown, generate_unlock_code, normalize_imei
 
 __all__ = [
     "BackupSyncEngine",
@@ -15,4 +16,7 @@ __all__ = [
     "ForensicsHub",
     "MLDiagnostics",
     "PluginRuntime",
+    "UnlockCodeBreakdown",
+    "generate_unlock_code",
+    "normalize_imei",
 ]
