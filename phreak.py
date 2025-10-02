@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# PHREAK v4 — full Android Operator Console with Hack Arsenal
+# Git-R-Done — full Android Operator Console with Hack Arsenal (formerly PHREAK v4)
 # Author: Chris Hirschauer
 import os, sys, shlex, subprocess, time, json, glob, re, shutil
 import importlib
@@ -13,7 +13,7 @@ keyboard = importlib.import_module("keyboard") if keyboard_spec else None
 ADB = "adb"
 FASTBOOT = "fastboot"
 MTK = "python3 " + str(Path.home() / "Apps/mtkclient/mtk")
-LOG_FILE = Path.home() / "phreak_tool.log.jsonl"
+LOG_FILE = Path.home() / "git_r_done.log.jsonl"
 LAST = ""  # persists on-screen
 
 # ---------- Logging ----------
@@ -59,6 +59,10 @@ def run(cmd, action="exec", shell=False, timeout=None, show_spinner=False, spinn
 from rich.live import Live
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.console import Console
+from rich import box
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 import threading, time, sys
 
 console = Console()
@@ -134,38 +138,55 @@ class Spinner:
 
 # ---------- UI ----------
 def clear(): os.system("clear" if os.name == "posix" else "cls")
+
+
 def banner():
-    art = r"""           █████                                   █████      ███
-          ░░███                                   ░░███      ░███
- ████████  ░███ █████ ████████   ██████   ██████   ░███ █████░███
-░░███░░███ ░███░░███ ░░███░░███ ███░░███ ░░░░░███  ░███░░███ ░███
- ░███ ░███ ░██████░   ░███ ░░░ ░███████   ███████  ░██████░  ░███
- ░███ ░███ ░███░░███  ░███     ░███░░░   ███░░███  ░███░░███ ░░░ 
- ░███████  ████ █████ █████    ░░██████ ░░████████ ████ █████ ███
- ░███░░░  ░░░░ ░░░░░ ░░░░░      ░░░░░░   ░░░░░░░░ ░░░░ ░░░░░ ░░░ 
- ░███                                                            
- █████                                                           
-░░░░░                                                            """
-    print("\033[95m" + art + "\033[0m")
-    print("       \033[97mAndroid Operator Console v4 (Hack Arsenal)\033[0m\n")
+    art = r"""   ____ _ _   ____      ____            ____              _
+  / ___(_) |_|  _ \  _ / ___| ___  _ __|  _ \  ___   ___| |__   ___ _ __
+ | |  _| | __| | | |/ / \___ \ / _ \| '__| | | |/ _ \ / __| '_ \ / _ \ '__|
+ | |_| | | |_| |_| / /__ ___) | (_) | |  | |_| | (_) | (__| | | |  __/ |
+  \____|_|\__|____/_____|____/ \___/|_|  |____/ \___/ \___|_| |_|\___|_|
+"""
+    console.print(f"[magenta]{art}[/magenta]")
+    console.print("[white]Git-R-Done Android Control Center[/white]\n")
 
 # change draw signature
 def draw(title, options, info=None, show_last=True, *, first_render=False):
     if first_render:
         clear()
         banner()
-        print(f"\033[96m=== {title} ===\033[0m   (h=help, b=back, q=quit)\n")
+        quick_tips = Text(
+            "Navigate with the number keys • h for contextual help • b to go back • q to exit",
+            style="cyan",
+        )
+        console.print(Panel.fit(quick_tips, border_style="bright_magenta"))
     else:
-        print("\n\033[95m" + "―" * 48 + "\033[0m")
-        print(f"\033[96m=== {title} ===\033[0m   (h=help, b=back, q=quit)\n")
+        console.rule(style="bright_magenta")
+
+    console.print(f"[bold cyan]{title}[/bold cyan]", justify="left")
+    console.print("[dim]Use the shortcuts shown below to take action.[/dim]\n")
+
     if info:
-        print("\033[93m--- Device Info ---\033[0m")
-        for k,v in info.items(): print(f"{k:14}: {v}")
-        print("")
-    for i,(label,desc) in enumerate(options,1):
-        print(f"{i}) {label}\n    \033[90m{desc}\033[0m")
+        info_table = Table.grid(padding=(0, 1))
+        info_table.add_column("Property", style="yellow", justify="right")
+        info_table.add_column("Value", style="white")
+        for k, v in info.items():
+            info_table.add_row(k, v)
+        console.print(Panel(info_table, title="Device Snapshot", border_style="yellow"))
+
+    option_table = Table(box=box.SIMPLE_HEAD, show_header=False, padding=(0, 1))
+    option_table.add_column("Choice", style="bold green", justify="right", width=6)
+    option_table.add_column("Action", style="white")
+    option_table.add_column("Details", style="dim")
+
+    for idx, (label, desc) in enumerate(options, 1):
+        option_table.add_row(f"[{idx}]", label, desc or "")
+
+    console.print(option_table)
+
     if show_last:
-        print("\n\033[90mLast: " + (LAST or "No actions yet") + "\033[0m")
+        status_text = LAST or "No actions yet"
+        console.print(Panel.fit(f"Last action: {status_text}", border_style="dim", style="dim"))
 
 
 # ---------- Detect ----------
