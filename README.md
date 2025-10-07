@@ -9,7 +9,7 @@
 <a href="#"><img src="https://img.shields.io/badge/Ephemeral-Contracts-7bafd4?logo=nodedotjs&logoColor=black&labelColor=8fbad9"></a>
 
 
-Git-R-Done (formerly PHREAK v4) is a comprehensive Android operator console that provides a unified interface for various Android device management tasks. This tool combines multiple functionalities into a structured menu-driven system, allowing users to perform everything from basic device operations to advanced modifications. The refreshed Git-R-Done interface focuses on quick navigation tips, clearer option descriptions, and an at-a-glance device snapshot so operators can get to work faster.
+(formerly PHREAK v4) is a comprehensive Android operator console that provides a unified interface for various Android device management tasks. This tool combines multiple functionalities into a structured menu-driven system, allowing users to perform everything from basic device operations to advanced modifications. The refreshed Git-R-Done interface focuses on quick navigation tips, clearer option descriptions, and an at-a-glance device snapshot so operators can get to work faster.
 
 > **Looking toward the legacy PHREAK v5 blueprint?** A full control-tower design that extends the red/green/blue layering into multi-device orchestration, forensic safety rails, cloud control planes, and plugin-driven extensibility now lives in [`docs/PHREAK_v5_architecture.md`](docs/PHREAK_v5_architecture.md).
 
