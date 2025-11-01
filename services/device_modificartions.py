@@ -1,11 +1,4 @@
-"""Device modification playbooks for PHREAK v5.
-
-This module codifies the operational flows described in the operator
-briefing for hidden menu access, auto rooting, side loading, crash handler
-setup, network unlocks, and the associated safety guides.  The playbooks
-are declarative so the orchestration layer can render them in UIs or
-execute them through automation pipelines.
-"""
+"""Device modification playbooks for PHREAK v5."""
 from __future__ import annotations
 
 from dataclasses import dataclass
