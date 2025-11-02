@@ -1,4 +1,4 @@
-"""Device modification playbooks for PHREAK v5."""
+"""Device modification playbooks, guidelines, and troubleshooting flows."""
 from __future__ import annotations
 
 from dataclasses import dataclass
