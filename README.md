@@ -2,7 +2,7 @@
 
 # PHREAK v5
 
-PHREAK v5 is a developer-grade Android operator console. It is a Rich-powered terminal UI that centralises ADB, Fastboot, MTK, and high-risk “hack arsenal” workflows under a single interactive menu. The refreshed release integrates a knowledge base, diagnostic bundle generator, and publish-ready collateral for carrier escalations.
+PHREAK v5 is a developer-grade Android operator console implemented as a Rich-powered terminal UI. It centralises the ADB, Fastboot, and MTK workflows that ship in this repository, bundles the redaction-aware diagnostic collector, and surfaces the operator knowledge base that lives under `docs/`. Optional modules—such as the Mobile Device Management (MDM) integration—remain isolated so the core console can run with minimal dependencies.
 
 > **Heads-up:** PHREAK v5 is intentionally a terminal application. There is no separate GUI binary—the Rich console exposed by the `phreak_v5` package is the primary interface and exposes every workflow described in the source tree.
 
@@ -18,12 +18,17 @@ PHREAK v5 is a developer-grade Android operator console. It is a Rich-powered te
 ## Quickstart
 
 1. **Install prerequisites** – Follow the step-by-step instructions in [`docs/INSTALLATION.md`](docs/INSTALLATION.md). Platform tools (`adb`, `fastboot`) must be on your `PATH`.
-2. **Activate your environment** – Optional, but a virtualenv keeps dependencies tidy.
-3. **Launch the console** – Connect a device, then run:
+2. **Install Python dependencies** –
+   ```bash
+   pip install -r requirements.txt
+   ```
+   The core console only depends on `rich` (and optionally `keyboard` for the hidden-menu hotkey). Install `requests` if you plan to use the standalone integrations.
+3. **Activate your environment** – Optional, but a virtualenv keeps dependencies tidy.
+4. **Launch the console** – Connect a device, then run:
    ```bash
    python -m phreak_v5
    ```
-4. **Navigate with the keyboard** – Use the numeric shortcuts shown on screen. Press `h` for contextual help, `b` to go back, and `hidden` (or `Ctrl+H` when the `keyboard` package is installed) to surface the hidden operations menu.
+5. **Navigate with the keyboard** – Use the numeric shortcuts shown on screen. Press `h` for contextual help, `b` to go back, and `hidden` (or `Ctrl+H` when the `keyboard` package is installed) to surface the hidden operations menu.
 
 Detailed menu walkthroughs live in [`docs/USAGE.md`](docs/USAGE.md).
 
@@ -31,11 +36,11 @@ Detailed menu walkthroughs live in [`docs/USAGE.md`](docs/USAGE.md).
 
 - **ADB operations** – Shell access, device profiling, smart file push, APK installs, OTA sideload, contact search, USB debugging enablement, and the brand-new diagnostic bundle collector that redacts sensitive identifiers before zipping evidence.
 - **Fastboot operations** – Partition flashing/booting, bootloader lock control, automated backups/restores, vbmeta patching, and Magisk auto-root assistance.
-- **MTK BootROM tooling** – Guided mediaTek bypass, BROM probing, and partition writes via `mtkclient`.
+- **MTK BootROM tooling** – Guided MediaTek bypass, BROM probing, and partition writes via `mtkclient` (install it separately and update `MTK` in `rich_console.py` if needed).
 - **Hack Arsenal** – Wizards for vbmeta patching, BootROM bypass checks, firmware hunting, network unlock triage, and Magisk workflows.
 - **Knowledge base** – In-console viewer for cheat sheets, carrier ticket templates, Kotlin telemetry samples, and all installation/usage docs.
 - **Hidden menu** – Trigger with `hidden` or `Ctrl+H` to open advanced shell and system-wide fastboot backups.
-- **Comprehensive logging** – Every command is journaled to `~/phreak_console.log.jsonl` for auditing.
+- **Comprehensive logging** – Every command is journaled to `~/phreak_console.log.jsonl` for auditing. The log writer ships in `phreak_v5/presentation/rich_console.py` and runs even when optional integrations are absent.
 
 ## Knowledge Base & Artifacts
 
@@ -50,6 +55,30 @@ The `docs/` directory now ships with publish-ready collateral:
 | [`USAGE.md`](docs/USAGE.md) | Menu tour, workflow explanations, and diagnostic bundle guidance. |
 
 Access these references directly from the main menu via **Knowledge base library**. They also double as onboarding material for downstream teams.
+
+## Optional integrations
+
+The console does not import integrations automatically, but the repository hosts self-contained modules under `integrations/` for teams that need them.
+
+### Mobile Device Management (MDM)
+
+The `integrations/mdm` package wraps the open-source `hmdm-server` API with a light Python client:
+
+- `config.py` exposes `MDM_BASE_URL`, `MDM_API_KEY`, and `MDM_TIMEOUT` via environment variables.
+- `client.py` depends on `requests` and performs the REST calls.
+- `server.py` provides a service wrapper that converts raw responses into dataclasses from `models.py`.
+- `tasks.py` contains a simple polling loop suitable for cron-style syncs.
+
+To experiment with the MDM integration:
+
+```bash
+export MDM_BASE_URL="http://localhost:8080/hmdm"
+export MDM_API_KEY="example-token"
+pip install requests
+python -m integrations.mdm.server  # imports the service and ensures dependencies resolve
+```
+
+Keep integrations decoupled from the console unless you wire them in deliberately (for example, by importing `integrations.mdm.server.MDMService` inside a `phreak_v5` service).
 
 ## Architecture Overview
 
