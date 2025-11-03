@@ -68,6 +68,7 @@ The `integrations/mdm` package wraps the open-source `hmdm-server` API with a li
 - `client.py` depends on `requests` and performs the REST calls.
 - `server.py` provides a service wrapper that converts raw responses into dataclasses from `models.py`.
 - `tasks.py` contains a simple polling loop suitable for cron-style syncs.
+- `cli.py` delivers a Rich-powered, menu-driven shell for live investigations and forensic exports.
 
 To experiment with the MDM integration:
 
@@ -76,9 +77,12 @@ export MDM_BASE_URL="http://localhost:8080/hmdm"
 export MDM_API_KEY="example-token"
 pip install requests
 python -m integrations.mdm.server  # imports the service and ensures dependencies resolve
+python -m integrations.mdm.cli     # launches the interactive dashboard
 ```
 
 Keep integrations decoupled from the console unless you wire them in deliberately (for example, by importing `integrations.mdm.server.MDMService` inside a `phreak_v5` service).
+
+For a forensic-grade walkthrough—including environment setup, action catalogue, and a sample transcript—see [`docs/MDM_FORENSIC_CLI.md`](docs/MDM_FORENSIC_CLI.md).
 
 ## Architecture Overview
 
