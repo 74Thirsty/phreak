@@ -21,7 +21,7 @@ Everything talks over an in-process telemetry bus, so you can tap into real-time
 1. **Python 3.10+** — The repository targets modern Python versions listed in the main README badge set. 【F:README.md†L6-L9】
 2. **Virtual environment** — Not required, but strongly recommended to keep PHREAK tooling isolated.
 3. **ADB/Fastboot binaries** — Only needed if you plan to connect to live devices right away.
-4. **Repository dependencies** — Install with `pip install -r requirements.txt` if your fork includes one; otherwise install packages ad-hoc as features demand (e.g., `rich` is already bundled in `phreak.py`).
+4. **Repository dependencies** — Install with `pip install -r requirements.txt` if your fork includes one; otherwise install packages ad-hoc as features demand (e.g., `rich` is already bundled with the `phreak_v5` Rich console).
 
 > 💡 Tip: The v5 control tower ships without heavy third-party bindings, so a clean Python install is usually all you need for the orchestration scaffolding.
 

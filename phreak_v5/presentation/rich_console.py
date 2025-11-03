@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Git-R-Done — full Android Operator Console with Hack Arsenal (formerly PHREAK v4)
+# PHREAK v5 — Android Operator Console with integrated workflow arsenal
 # Author: Chris Hirschauer
 import os, sys, shlex, subprocess, time, json, glob, re, shutil
 import importlib
@@ -13,9 +13,9 @@ keyboard = importlib.import_module("keyboard") if keyboard_spec else None
 ADB = "adb"
 FASTBOOT = "fastboot"
 MTK = "python3 " + str(Path.home() / "Apps/mtkclient/mtk")
-LOG_FILE = Path.home() / "git_r_done.log.jsonl"
+LOG_FILE = Path.home() / "phreak_console.log.jsonl"
 LAST = ""  # persists on-screen
-ROOT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 DOCS_DIR = ROOT_DIR / "docs"
 KNOWLEDGE_BASE = [
     ("Hidden commands cheat sheet", "Dialer codes and safe ADB/Fastboot probes.", DOCS_DIR / "hidden_commands.md"),
@@ -160,7 +160,7 @@ def banner():
   \____|_|\__|____/_____|____/ \___/|_|  |____/ \___/ \___|_| |_|\___|_|
 """
     console.print(f"[magenta]{art}[/magenta]")
-    console.print("[white]Git-R-Done Android Control Center[/white]\n")
+    console.print("[white]PHREAK v5 Android Control Center[/white]\n")
 
 # change draw signature
 def draw(title, options, info=None, show_last=True, *, first_render=False):
