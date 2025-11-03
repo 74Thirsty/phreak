@@ -15,6 +15,15 @@ FASTBOOT = "fastboot"
 MTK = "python3 " + str(Path.home() / "Apps/mtkclient/mtk")
 LOG_FILE = Path.home() / "git_r_done.log.jsonl"
 LAST = ""  # persists on-screen
+ROOT_DIR = Path(__file__).resolve().parent
+DOCS_DIR = ROOT_DIR / "docs"
+KNOWLEDGE_BASE = [
+    ("Hidden commands cheat sheet", "Dialer codes and safe ADB/Fastboot probes.", DOCS_DIR / "hidden_commands.md"),
+    ("Carrier ticket template", "Copy/paste provisioning escalation body.", DOCS_DIR / "carrier_ticket_template.md"),
+    ("Android SDK telemetry sample", "Kotlin collector skeleton for apps.", DOCS_DIR / "android_sdk_sample.md"),
+    ("Installation guide", "Host setup requirements and dependency list.", DOCS_DIR / "INSTALLATION.md"),
+    ("Usage guide", "Menu walkthroughs and feature overview.", DOCS_DIR / "USAGE.md"),
+]
 
 # ---------- Logging ----------
 def log_event(action, cmd, out, err, code):
@@ -63,7 +72,10 @@ from rich import box
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+from rich.markdown import Markdown
 import threading, time, sys
+
+from services.diag_collector import collect_diagnostics
 
 console = Console()
 
@@ -519,6 +531,61 @@ def firmware_hunter():
     for u in urls: print("  →", u)
     print("\n⚠️ boot.img + super/vendor/system + vbmeta must match the SAME build.")
 
+
+def collect_support_bundle_interactive():
+    """Interactive wrapper for the diagnostic bundle collector."""
+    default_path = Path.cwd() / f"support_bundle_{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.zip"
+    dest = input(f"Output zip path [{default_path}]: ").strip() or str(default_path)
+    include_bugreport = input("Include full adb bugreport? [Y/n]: ").strip().lower() not in {"n", "no"}
+
+    spinner = Spinner("Collecting diagnostics", transient=False)
+    spinner.start()
+
+    try:
+        bundle_path = collect_diagnostics(
+            dest,
+            include_bugreport=include_bugreport,
+            progress_cb=lambda msg: spinner.update(msg),
+        )
+        spinner.stop(final=f"Bundle saved → {bundle_path}")
+        print(f"\n📦 Support bundle created: {bundle_path}\n")
+    except Exception as exc:
+        spinner.stop(final="Collection failed", success=False)
+        print(f"\n❌ Diagnostic collection failed: {exc}\n")
+
+
+def _render_document(path: Path) -> None:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        console.print(f"[red]Document not found:[/red] {path}")
+        return
+    console.print(Markdown(content), soft_wrap=True)
+    input("\nPress Enter to return…")
+
+
+def knowledge_base_menu():
+    first_render = True
+    while True:
+        opts = [(title, desc) for title, desc, _ in KNOWLEDGE_BASE]
+        opts.append(("Back", "Return to main menu."))
+        draw("KNOWLEDGE BASE", opts, first_render=first_render, show_last=False)
+        first_render = False
+        choice = input("Select: ").strip().lower()
+        if choice in {"b", str(len(opts))}:
+            break
+        if choice == "h":
+            help_block("KB")
+            continue
+        if not choice.isdigit():
+            continue
+        idx = int(choice) - 1
+        if idx < 0 or idx >= len(KNOWLEDGE_BASE):
+            continue
+        _, _, doc_path = KNOWLEDGE_BASE[idx]
+        _render_document(doc_path)
+
+
 def preflight():
     print("\n\033[96mPreflight checks\033[0m")
 
@@ -661,7 +728,8 @@ def help_block(topic):
 - ADB ops: phone is ON with USB debugging (adb devices shows 'device').
 - Fastboot ops: phone in bootloader (fastboot devices shows a serial).
 - MTK BROM: MediaTek BootROM bypass (mtkclient), used when SPFT asks for .auth.
-- Hack Arsenal: guided flows (fix dm-verity, root, etc.).""",
+- Hack Arsenal: guided flows (fix dm-verity, root, etc.).
+- Knowledge base: renders cheat sheets, templates, and SDK snippets.""",
         "ADB": """Common paths:
 - Remote path usually /sdcard/Download/  (writable without root)
 - /data/local/tmp/ is a staging area (writable via adb)
@@ -682,6 +750,8 @@ If SP Flash Tool asks for .auth, use BROM bypass instead.""",
 - BROM Bypass: talks to BootROM to skip .auth.
 - Magisk Auto-Root: push stock boot.img -> patch in Magisk -> pull/flash.
 - Firmware Hunter: builds search links for the exact fingerprint/codename."""
+        ,
+        "KB": """Knowledge base documents render in the console. Use arrow keys or PgUp/PgDn in your terminal to scroll, then press Enter to return."""
     }
     print("\n\033[96m[HELP]\033[0m " + HELP.get(topic, "No help for this section.") + "\n")
     input("Press Enter…")
@@ -725,6 +795,7 @@ def menu_adb():
             ("Firmware Hunter (links)", "Build search URLs for exact firmware."),
             ("Enable USB Debugging (locked)", "Try various methods to enable debugging"),
             ("Locate contact by phone number", "Search device contacts for a number fragment."),
+            ("Collect diagnostic bundle", "Generate redacted support ZIP for carriers."),
             ("Back", "Return to main menu."),
         ]
         draw("ADB MENU", opts, info, first_render=first_render)
@@ -746,7 +817,8 @@ def menu_adb():
         elif c == "11": firmware_hunter()
         elif c == "12": enable_debug_anyway()
         elif c == "13": locate_by_phone_number()
-        elif c == "14": break
+        elif c == "14": collect_support_bundle_interactive()
+        elif c == "15": break
 
 def menu_fastboot():
     first_render = True
@@ -890,6 +962,7 @@ def main():
             ("MTK BROM", "MediaTek BootROM bypass via mtkclient."),
             ("Hack Arsenal (Guided)", "Wizards: fix dm-verity, unbrick MTK, root, firmware."),
             ("Preflight Check", "Check tools/drivers/devices before you start."),
+            ("Knowledge base library", "Cheat sheets, templates, SDK samples."),
             ("Quit", "Exit the console.")
         ]
 
@@ -897,13 +970,14 @@ def main():
         first_render = False
         c = input("Select: ").strip().lower()
         if   c == "h": help_block("MAIN")
-        elif c == "q" or c == "6": sys.exit(0)
+        elif c == "q" or c == "7": sys.exit(0)
         elif c == "b": continue
         elif c == "1": menu_adb()
         elif c == "2": menu_fastboot()
         elif c == "3": menu_mtk()
         elif c == "4": menu_hack()
         elif c == "5": preflight()
+        elif c == "6": knowledge_base_menu()
         elif c == "hidden": hidden_menu.open_menu()
 
 

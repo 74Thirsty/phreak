@@ -1,87 +1,96 @@
 ![Sheen Banner](https://raw.githubusercontent.com/74Thirsty/74Thirsty/main/assets/phreak.svg)
 
+# Git-R-Done (formerly PHREAK v4)
 
+Git-R-Done is a developer-grade Android operator console. It is a Rich-powered terminal UI that centralises ADB, Fastboot, MTK, and high-risk “hack arsenal” workflows under a single interactive menu. The refreshed release integrates a knowledge base, diagnostic bundle generator, and publish-ready collateral for carrier escalations.
 
-<a href="#"><img src="https://img.shields.io/badge/Built%20with-PyCharm-8fbad9?logo=pycharm&logoColor=black&labelColor=7bafd4"></a>
-<a href="#"><img src="https://img.shields.io/badge/Python-3.10_|_3.11_|_3.12-b7d0e3?logo=python&logoColor=black&labelColor=a3c5de"></a>
-<a href="#"><img src="https://img.shields.io/badge/Solidity-0.8.20_|_0.8.28-dfe7ed?logo=ethereum&logoColor=black&labelColor=cbdce8"></a>
-<a href="#"><img src="https://img.shields.io/badge/Flashbots-MEV%20Bundle-b7d0e3?logo=thunderbird&logoColor=black&labelColor=cbdce8"></a>
-<a href="#"><img src="https://img.shields.io/badge/Ephemeral-Contracts-7bafd4?logo=nodedotjs&logoColor=black&labelColor=8fbad9"></a>
+> **Heads-up:** Git-R-Done is intentionally a terminal application. There is no separate GUI binary—the `phreak.py` console is the primary interface and now exposes every workflow described in the source tree.
 
+## Contents
 
-(formerly PHREAK v4) is a comprehensive Android operator console that provides a unified interface for various Android device management tasks. This tool combines multiple functionalities into a structured menu-driven system, allowing users to perform everything from basic device operations to advanced modifications. The refreshed Git-R-Done interface focuses on quick navigation tips, clearer option descriptions, and an at-a-glance device snapshot so operators can get to work faster.
+- [Quickstart](#quickstart)
+- [Feature Highlights](#feature-highlights)
+- [Knowledge Base & Artifacts](#knowledge-base--artifacts)
+- [Architecture Overview](#architecture-overview)
+- [Control Tower Blueprint](#control-tower-blueprint)
+- [Contributing](#contributing)
 
-> **Looking toward the legacy PHREAK v5 blueprint?** A full control-tower design that extends the red/green/blue layering into multi-device orchestration, forensic safety rails, cloud control planes, and plugin-driven extensibility now lives in [`docs/PHREAK_v5_architecture.md`](docs/PHREAK_v5_architecture.md).
+## Quickstart
 
-### PHREAK v5 Control Tower Package
+1. **Install prerequisites** – Follow the step-by-step instructions in [`docs/INSTALLATION.md`](docs/INSTALLATION.md). Platform tools (`adb`, `fastboot`) must be on your `PATH`.
+2. **Activate your environment** – Optional, but a virtualenv keeps dependencies tidy.
+3. **Launch the console** – Connect a device, then run:
+   ```bash
+   python phreak.py
+   ```
+4. **Navigate with the keyboard** – Use the numeric shortcuts shown on screen. Press `h` for contextual help, `b` to go back, and `hidden` (or `Ctrl+H` when the `keyboard` package is installed) to surface the hidden operations menu.
 
-The repository now includes a `phreak_v5` Python package that converts the v5 architecture blueprint into code. The package wires together red/green/blue layers with telemetry and auditing so downstream interfaces can share a common control plane.
+Detailed menu walkthroughs live in [`docs/USAGE.md`](docs/USAGE.md).
 
-* **Core layer (`phreak_v5.core`)** &mdash; connection matrix, policy engine, command router, audit logging, and a pluggable secret vault.
-* **Operator services (`phreak_v5.services`)** &mdash; device graph orchestrator, forensics hub, firmware store, backup scheduler, heuristic ML diagnostics, and a JSON-manifest plugin runtime.
-* **Presentation surfaces (`phreak_v5.presentation`)** &mdash; stubs for a curses control room, web cockpit state exporter, automation API facade, and observability metrics collector.
-* **Orchestrator (`phreak_v5.PhreakControlTower`)** &mdash; high-level façade that instantiates all subsystems, exposes helper methods for device registration, job dispatch, secrets, firmware ingestion, backups, and forensics collection.
+## Feature Highlights
 
-This scaffolding is intentionally light on platform-specific logic so it can evolve alongside the blueprint while still providing working telemetry, logging, and storage primitives for experimentation.
+- **ADB operations** – Shell access, device profiling, smart file push, APK installs, OTA sideload, contact search, USB debugging enablement, and the brand-new diagnostic bundle collector that redacts sensitive identifiers before zipping evidence.
+- **Fastboot operations** – Partition flashing/booting, bootloader lock control, automated backups/restores, vbmeta patching, and Magisk auto-root assistance.
+- **MTK BootROM tooling** – Guided mediaTek bypass, BROM probing, and partition writes via `mtkclient`.
+- **Hack Arsenal** – Wizards for vbmeta patching, BootROM bypass checks, firmware hunting, network unlock triage, and Magisk workflows.
+- **Knowledge base** – In-console viewer for cheat sheets, carrier ticket templates, Kotlin telemetry samples, and all installation/usage docs.
+- **Hidden menu** – Trigger with `hidden` or `Ctrl+H` to open advanced shell and system-wide fastboot backups.
+- **Comprehensive logging** – Every command is journaled to `~/git_r_done.log.jsonl` for auditing.
 
-### Core Architecture
+## Knowledge Base & Artifacts
 
-The tool operates through several interconnected layers:
+The `docs/` directory now ships with publish-ready collateral:
 
-1. **Command Execution Layer**  - Handles ADB and Fastboot operations
-  - Manages process execution and error handling
-  - Provides logging functionality
+| Document | Description |
+| -------- | ----------- |
+| [`hidden_commands.md`](docs/hidden_commands.md) | Safe Motorola/Android dialer codes and diagnostic ADB/Fastboot probes. |
+| [`carrier_ticket_template.md`](docs/carrier_ticket_template.md) | Copy/paste body for provisioning or carrier escalations. |
+| [`android_sdk_sample.md`](docs/android_sdk_sample.md) | Kotlin telemetry collector skeleton for embedding in mobile apps. |
+| [`INSTALLATION.md`](docs/INSTALLATION.md) | Host setup, dependency installation, and launch instructions. |
+| [`USAGE.md`](docs/USAGE.md) | Menu tour, workflow explanations, and diagnostic bundle guidance. |
 
+Access these references directly from the main menu via **Knowledge base library**. They also double as onboarding material for downstream teams.
 
-2. **Menu System**  - Hierarchical navigation structure
-  - Context-aware operation selection
-  - Real-time device status display
+## Architecture Overview
 
-
-3. **Operation Categories**  - Basic device management
-  - Advanced modification tools
-  - Diagnostic utilities
-  - Specialized functions (MTK, root, etc.)
-
-
-
+The Rich-powered console layers command execution, logging, state management, and the menu renderer:
 
 ```mermaid
 flowchart TD
     classDef core fill:#ff9999,color:#000,stroke:#ff6666
     classDef ops fill:#99ff99,color:#000,stroke:#66ff66
     classDef ui fill:#9999ff,color:#000,stroke:#6666ff
-    
+
     subgraph Core["Core Components"]
         direction TB
         Exec["Execution Engine"]:::core
         Log["Logging System"]:::core
         State["State Manager"]:::core
     end
-    
+
     subgraph Ops["Operations"]
         direction TB
         Basic["Basic Operations"]:::ops
         Adv["Advanced Modifications"]:::ops
         Diag["Diagnostics"]:::ops
     end
-    
+
     subgraph UI["User Interface"]
         direction TB
         Menu["Menu System"]:::ui
         Display["Display & Input"]:::ui
     end
-    
+
     Exec --> Basic
     Exec --> Adv
     Exec --> Diag
-    
+
     Log --> State
     State --> Menu
-    
+
     Menu --> Display
     Display --> Exec
-    
+
     %% Legend
     subgraph Legend["Legend"]
         C1[Core Components]:::core
@@ -90,96 +99,50 @@ flowchart TD
     end
 ```
 
-
-The diagram above illustrates the tool's architecture, where:
-
-- Red components represent core system elements that handle fundamental operations
-- Green components show operational modules that perform specific device-related tasks
-- Blue components indicate user interface elements that manage interaction
-
-Arrows demonstrate data and control flow between components, with the Execution Engine serving as the central coordinator between user interactions and device operations.
-
-### Key Components
-
-#### 1. Command Execution System
+### Command Execution
 
 ```python
 def run(cmd, action="exec", shell=False, timeout=None, show_spinner=False, spinner_text=None):
-    global LAST
-    sp = None
-    try:
-        if show_spinner:
-            sp = Spinner(spinner_text or f"{action}…")
-            sp.start()
-        # ...
+    # Handles subprocess management, logging, spinner updates, and LAST status banner.
 ```
 
-This core function handles all external command execution with features including:
+- Rich spinners and progress messaging keep long-running operations transparent.
+- Logs are appended to `~/git_r_done.log.jsonl` for later auditing.
+- Missing binaries and timeouts are surfaced in the UI without crashing the session.
 
-- Configurable timeouts
-- Spinner-based progress indication
-- Comprehensive error handling
-- Detailed logging
-
-#### 2. Device Detection
+### Device Detection
 
 ```python
 def mode():
-    out,_,_ = run(f"{ADB} get-state","detect_adb")
-    if out.strip()=="device": return "adb"
-    out,_,_ = run(f"{FASTBOOT} devices","detect_fastboot")
-    if "fastboot" in out: return "fastboot"
-    return None
+    if adb says "device": return "adb"
+    if fastboot reports a device: return "fastboot"
 ```
 
-Automatically detects device state and available interfaces:
+- Automatically detects the current transport mode.
+- Surfaces quick status in the UI banner.
 
-- ADB mode detection
-- Fastboot mode verification
-- Connection status reporting
+### Operation Families
 
-#### 3. Operation Categories
+- **Basic operations** – Push, install, sideload, profile devices, capture logcat.
+- **Advanced modifications** – vbmeta patching, Magisk flows, BootROM utilities.
+- **Diagnostics** – Support bundle generator, contact search, network unlock assistant, and firmware hunting.
 
-The tool organizes operations into distinct categories:
+## Control Tower Blueprint
 
-1. **Basic Operations**  - File transfers (single and batch)
-  - Package management
-  - System logs viewing
-  - Device profiling
+Looking toward the long-term PHREAK v5 design? The `phreak_v5` Python package converts the blueprint into runnable scaffolding:
 
+- **Core layer (`phreak_v5.core`)** – Connection matrix, policy engine, command router, audit logging, pluggable secret vault.
+- **Operator services (`phreak_v5.services`)** – Device graph orchestrator, forensic hub, firmware store, backup scheduler, heuristic diagnostics, and plugin runtime.
+- **Presentation surfaces (`phreak_v5.presentation`)** – Stubs for curses control room, web cockpit exporter, automation API façade, and observability collector.
+- **Orchestrator (`phreak_v5.PhreakControlTower`)** – High-level façade for registration, job dispatch, secrets, firmware ingestion, backups, and forensics.
 
-2. **Advanced Modifications**  - VBMETA patching
-  - Magisk rooting
-  - Firmware hunting
-  - MTK-specific operations
+This scaffolding is intentionally light on OEM-specific logic so you can grow the platform alongside the console experience.
 
+## Contributing
 
-3. **Diagnostic Tools**  - Device property retrieval
-  - Live logcat monitoring
-  - Partition backup/restore
-  - Driver verification
+1. Fork the repo and create a feature branch.
+2. Run `python phreak.py` to exercise changes (no GUI build step required).
+3. Add tests or documentation as needed.
+4. Submit a pull request with a summary of the changes and relevant diagnostics bundles when applicable.
 
-
-
-### Usage Considerations
-
-1. **Prerequisites**  - ADB/Fastboot installation
-  - Proper USB drivers
-  - Appropriate permissions
-  - Required dependencies (avbtool, mtkclient)
-
-
-2. **Safety Features**  - Timeout protection
-  - Error logging
-  - Confirmation prompts
-  - Backup support
-
-
-3. **Best Practices**  - Always verify device state before operations
-  - Create backups before modifications
-  - Monitor logs during critical operations
-  - Keep track of last operation status
-
-
-
-This implementation provides a robust foundation for Android device management while maintaining flexibility for future enhancements and customizations.
+Bugs, feature requests, and pull requests are welcome. When filing tickets, include the support bundle generated by the diagnostic collector to speed up triage.
