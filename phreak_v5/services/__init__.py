@@ -1,6 +1,14 @@
 """Operator services exposed by the PHREAK v5 control tower."""
 from .backup import BackupSyncEngine
 from .device_graph import DeviceGraphOrchestrator
+from .device_modifications import (
+    CommandStep,
+    DeviceModificationOrchestrator,
+    Guideline,
+    Playbook,
+    TroubleshootingGuide,
+    TroubleshootingStep,
+)
 from .enrollment import DeviceRegistry
 from .firmware import FirmwareSuite
 from .forensics import ForensicsHub
@@ -22,6 +30,8 @@ from .unlock import UnlockCodeBreakdown, generate_unlock_code, normalize_imei
 __all__ = [
     "BackupSyncEngine",
     "DeviceGraphOrchestrator",
+    "CommandStep",
+    "DeviceModificationOrchestrator",
     "DeviceRegistry",
     "FirmwareSuite",
     "ForensicsHub",
@@ -35,6 +45,10 @@ __all__ = [
     "FunctionContract",
     "FunctionOntologyEntry",
     "FunctionTestVector",
+    "Guideline",
+    "Playbook",
+    "TroubleshootingGuide",
+    "TroubleshootingStep",
     "ValidatorReport",
     "UnlockCodeBreakdown",
     "generate_unlock_code",
