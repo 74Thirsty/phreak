@@ -1,10 +1,10 @@
 ![Sheen Banner](https://raw.githubusercontent.com/74Thirsty/74Thirsty/main/assets/phreak.svg)
 
-# Git-R-Done (formerly PHREAK v4)
+# PHREAK v5
 
-Git-R-Done is a developer-grade Android operator console. It is a Rich-powered terminal UI that centralises ADB, Fastboot, MTK, and high-risk “hack arsenal” workflows under a single interactive menu. The refreshed release integrates a knowledge base, diagnostic bundle generator, and publish-ready collateral for carrier escalations.
+PHREAK v5 is a developer-grade Android operator console. It is a Rich-powered terminal UI that centralises ADB, Fastboot, MTK, and high-risk “hack arsenal” workflows under a single interactive menu. The refreshed release integrates a knowledge base, diagnostic bundle generator, and publish-ready collateral for carrier escalations.
 
-> **Heads-up:** Git-R-Done is intentionally a terminal application. There is no separate GUI binary—the `phreak.py` console is the primary interface and now exposes every workflow described in the source tree.
+> **Heads-up:** PHREAK v5 is intentionally a terminal application. There is no separate GUI binary—the Rich console exposed by the `phreak_v5` package is the primary interface and exposes every workflow described in the source tree.
 
 ## Contents
 
@@ -21,7 +21,7 @@ Git-R-Done is a developer-grade Android operator console. It is a Rich-powered t
 2. **Activate your environment** – Optional, but a virtualenv keeps dependencies tidy.
 3. **Launch the console** – Connect a device, then run:
    ```bash
-   python phreak.py
+   python -m phreak_v5
    ```
 4. **Navigate with the keyboard** – Use the numeric shortcuts shown on screen. Press `h` for contextual help, `b` to go back, and `hidden` (or `Ctrl+H` when the `keyboard` package is installed) to surface the hidden operations menu.
 
@@ -35,7 +35,7 @@ Detailed menu walkthroughs live in [`docs/USAGE.md`](docs/USAGE.md).
 - **Hack Arsenal** – Wizards for vbmeta patching, BootROM bypass checks, firmware hunting, network unlock triage, and Magisk workflows.
 - **Knowledge base** – In-console viewer for cheat sheets, carrier ticket templates, Kotlin telemetry samples, and all installation/usage docs.
 - **Hidden menu** – Trigger with `hidden` or `Ctrl+H` to open advanced shell and system-wide fastboot backups.
-- **Comprehensive logging** – Every command is journaled to `~/git_r_done.log.jsonl` for auditing.
+- **Comprehensive logging** – Every command is journaled to `~/phreak_console.log.jsonl` for auditing.
 
 ## Knowledge Base & Artifacts
 
@@ -107,7 +107,7 @@ def run(cmd, action="exec", shell=False, timeout=None, show_spinner=False, spinn
 ```
 
 - Rich spinners and progress messaging keep long-running operations transparent.
-- Logs are appended to `~/git_r_done.log.jsonl` for later auditing.
+- Logs are appended to `~/phreak_console.log.jsonl` for later auditing.
 - Missing binaries and timeouts are surfaced in the UI without crashing the session.
 
 ### Device Detection
@@ -141,7 +141,7 @@ This scaffolding is intentionally light on OEM-specific logic so you can grow th
 ## Contributing
 
 1. Fork the repo and create a feature branch.
-2. Run `python phreak.py` to exercise changes (no GUI build step required).
+2. Run `python -m phreak_v5` to exercise changes (no GUI build step required).
 3. Add tests or documentation as needed.
 4. Submit a pull request with a summary of the changes and relevant diagnostics bundles when applicable.
 

@@ -1,6 +1,6 @@
 # Installation Guide
 
-Git-R-Done ships as a standalone Python application. The toolkit targets Linux, macOS, and Windows hosts with the Android SDK platform tools installed.
+PHREAK v5 ships as a standalone Python application. The toolkit targets Linux, macOS, and Windows hosts with the Android SDK platform tools installed.
 
 ## 1. System Requirements
 
@@ -28,7 +28,7 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
 ## 4. Install Python Dependencies
 
-Git-R-Done relies solely on the standard library plus [`rich`](https://github.com/Textualize/rich) for its text-based UI. Install the requirement from `pyproject.toml`.
+PHREAK v5 relies solely on the standard library plus [`rich`](https://github.com/Textualize/rich) for its text-based UI. Install the requirement from `pyproject.toml`.
 
 ```bash
 pip install -r requirements.txt  # if you maintain a pinned list
@@ -58,7 +58,7 @@ Hotkeys are optional; the menu remains reachable by typing `hidden` at the promp
 ## 7. Launch the Toolkit
 
 ```bash
-python phreak.py
+python -m phreak_v5
 ```
 
 Use a USB cable with proper drivers for your platform, authorize the host for USB debugging, and you are ready to work.

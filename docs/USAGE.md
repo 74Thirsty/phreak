@@ -1,6 +1,6 @@
 # Usage Guide
 
-`phreak.py` provides a terminal-first operator console powered by the Rich library. Launch it with `python phreak.py` and follow the numbered prompts.
+`phreak_v5.presentation.rich_console` provides a terminal-first operator console powered by the Rich library. Launch it with `python -m phreak_v5` and follow the numbered prompts.
 
 ## Main Menu Overview
 

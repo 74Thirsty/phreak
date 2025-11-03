@@ -1,4 +1,4 @@
-"""Diagnostic bundle collector for Git-R-Done.
+"""Diagnostic bundle collector for PHREAK v5.
 
 This module runs a curated list of safe ADB commands, redacts personally
 identifiable information, and packages the output into a ZIP archive.
@@ -98,7 +98,7 @@ def collect_diagnostics(
     if include_bugreport:
         probes["bugreport.txt"] = [ADB, "bugreport"]
 
-    tmpdir = Path(tempfile.mkdtemp(prefix="git_r_done_diag_"))
+    tmpdir = Path(tempfile.mkdtemp(prefix="phreak_diag_"))
     try:
         for name, cmd in probes.items():
             report(f"Running {' '.join(cmd)}")
