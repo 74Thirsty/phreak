@@ -33,38 +33,6 @@ def log_event(action, cmd, out, err, code):
     }
     with open(LOG_FILE, "a") as f: f.write(json.dumps(entry) + "\n")
 
-def run(cmd, action="exec", shell=False, timeout=None, show_spinner=False, spinner_text=None):
-    global LAST
-    sp = None
-    try:
-        if show_spinner:
-            sp = Spinner(spinner_text or f"{action}…")
-            sp.start()
-
-        if shell:
-            proc = subprocess.run(cmd, capture_output=True, text=True, shell=True, timeout=timeout)
-        else:
-            proc = subprocess.run(shlex.split(cmd), capture_output=True, text=True, timeout=timeout)
-
-        out, err, code = proc.stdout.strip(), proc.stderr.strip(), proc.returncode
-        log_event(action, cmd, out, err, code)
-        FIRST = (out.splitlines()[0] if out else "") or (err.splitlines()[0] if err else "")
-        LAST = f"[{action}] exit={code} :: {FIRST}"
-        return out, err, code
-
-    except subprocess.TimeoutExpired:
-        LAST = f"[{action}] timeout"
-        log_event(action, cmd, "", "timeout", 124)
-        return "", "timeout", 124
-
-    except FileNotFoundError:
-        LAST = f"[{action}] missing binary: {cmd.split()[0]}"
-        log_event(action, cmd, "", LAST, 127)
-        return "", LAST, 127
-
-    finally:
-        if sp: sp.stop()
-
 from rich.live import Live
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.console import Console
@@ -623,6 +591,21 @@ def preflight():
                 if err:
                     print(f"     stderr: {err.splitlines()[-1]}")
 
+    # --- Post-checks ---
+    out, _, _ = run("lsusb", "lsusb", shell=True)
+    if "0e8d:" in out:
+        print(" • MTK device present (0e8d).")
+
+    out, _, _ = run(f"{ADB} devices", "adb_devices")
+    if "device" in out.split():
+        print(" • ADB device connected.")
+
+    out, _, _ = run(f"{FASTBOOT} devices", "fb_devices")
+    if "fastboot" in out:
+        print(" • Fastboot device connected.")
+
+    input("\nPress Enter…")
+
 def run(cmd, action="exec", shell=False, timeout=None, show_spinner=False, spinner_text=None):
     global LAST
     sp = None
@@ -688,21 +671,6 @@ def run(cmd, action="exec", shell=False, timeout=None, show_spinner=False, spinn
         if sp and sp._running:  # just in case
             sp.stop()
 
-
-    # --- Post-checks ---
-    out, _, _ = run("lsusb", "lsusb", shell=True)
-    if "0e8d:" in out:
-        print(" • MTK device present (0e8d).")
-
-    out, _, _ = run(f"{ADB} devices", "adb_devices")
-    if "device" in out.split():
-        print(" • ADB device connected.")
-
-    out, _, _ = run(f"{FASTBOOT} devices", "fb_devices")
-    if "fastboot" in out:
-        print(" • Fastboot device connected.")
-
-    input("\nPress Enter…")
 
 # ---------- MTK bypass ----------
 def mtk_probe():
@@ -870,9 +838,9 @@ def menu_mtk():
         )
         first_render = False
         c = input("Select: ").strip().lower()
-        if   c == "1": mtk_probe()
-        elif c == "2": mtk_write_single()
-        elif c == "3": break
+        if   c == "1": preflight()
+        elif c == "2": mtk_probe()
+        elif c == "3": mtk_write_single()
         elif c == "4": break
 
 class HiddenMenu:
