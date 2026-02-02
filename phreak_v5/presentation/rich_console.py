@@ -195,6 +195,51 @@ def adb_props():
     }
     return info
 
+
+def save_device_snapshot(output_path: Path | None = None) -> Path:
+    """Save the current adb_props() snapshot to a JSON file."""
+    global LAST
+    info = adb_props()
+    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    if output_path is None:
+        output_path = Path.cwd() / f"device_snapshot_{timestamp}.json"
+    else:
+        output_path = Path(output_path)
+    output_path.write_text(json.dumps(info, indent=2), encoding="utf-8")
+    LAST = f"snapshot saved: {output_path}"
+    return output_path
+
+
+def view_recent_activity(limit: int = 20) -> None:
+    """Render recent command activity from the JSONL log file."""
+    if not LOG_FILE.exists():
+        console.print("[yellow]No log entries yet.[/yellow]")
+        input("\nPress Enter…")
+        return
+    lines = LOG_FILE.read_text(encoding="utf-8").splitlines()
+    if not lines:
+        console.print("[yellow]No log entries yet.[/yellow]")
+        input("\nPress Enter…")
+        return
+    table = Table(box=box.SIMPLE_HEAVY)
+    table.add_column("Time", style="cyan", no_wrap=True)
+    table.add_column("Action", style="magenta")
+    table.add_column("Exit", style="green", justify="right")
+    table.add_column("Command", style="white")
+    for line in lines[-limit:]:
+        try:
+            entry = json.loads(line)
+            table.add_row(
+                entry.get("ts", "?"),
+                entry.get("action", "?"),
+                str(entry.get("exit", "?")),
+                entry.get("cmd", ""),
+            )
+        except json.JSONDecodeError:
+            table.add_row("?", "invalid", "?", line[:120])
+    console.print(Panel(table, title="Recent Activity", border_style="bright_magenta"))
+    input("\nPress Enter…")
+
 def detect_screen_state():
     """Detect if device is screen locked"""
     out, _, _ = run(f"{ADB} shell dumpsys window policy", "screen_check")
@@ -697,12 +742,14 @@ def help_block(topic):
 - Fastboot ops: phone in bootloader (fastboot devices shows a serial).
 - MTK BROM: MediaTek BootROM bypass (mtkclient), used when SPFT asks for .auth.
 - Hack Arsenal: guided flows (fix dm-verity, root, etc.).
-- Knowledge base: renders cheat sheets, templates, and SDK snippets.""",
+- Knowledge base: renders cheat sheets, templates, and SDK snippets.
+- Activity log: review recent command outcomes from the session log.""",
         "ADB": """Common paths:
 - Remote path usually /sdcard/Download/  (writable without root)
 - /data/local/tmp/ is a staging area (writable via adb)
 - 'Push file (smart)' installs APKs automatically after push.
-- 'OTA sideload' requires stock recovery + an update.zip.""",
+- 'OTA sideload' requires stock recovery + an update.zip.
+- 'Save device snapshot' writes a JSON profile to the working directory.""",
         "FASTBOOT": """Flashing writes directly to partitions. Triple-check file/partition:
 - vbmeta: Verified Boot metadata (patch to disable verity).
 - super: dynamic partitions container (system/vendor/product).
@@ -764,6 +811,7 @@ def menu_adb():
             ("Enable USB Debugging (locked)", "Try various methods to enable debugging"),
             ("Locate contact by phone number", "Search device contacts for a number fragment."),
             ("Collect diagnostic bundle", "Generate redacted support ZIP for carriers."),
+            ("Save device snapshot", "Write device profile JSON to the local folder."),
             ("Back", "Return to main menu."),
         ]
         draw("ADB MENU", opts, info, first_render=first_render)
@@ -786,7 +834,11 @@ def menu_adb():
         elif c == "12": enable_debug_anyway()
         elif c == "13": locate_by_phone_number()
         elif c == "14": collect_support_bundle_interactive()
-        elif c == "15": break
+        elif c == "15":
+            snapshot = save_device_snapshot()
+            print(f"\nSaved snapshot: {snapshot}")
+            input("Enter…")
+        elif c == "16": break
 
 def menu_fastboot():
     first_render = True
@@ -931,6 +983,7 @@ def main():
             ("Hack Arsenal (Guided)", "Wizards: fix dm-verity, unbrick MTK, root, firmware."),
             ("Preflight Check", "Check tools/drivers/devices before you start."),
             ("Knowledge base library", "Cheat sheets, templates, SDK samples."),
+            ("Activity log", "Review recent console command history."),
             ("Quit", "Exit the console.")
         ]
 
@@ -938,7 +991,7 @@ def main():
         first_render = False
         c = input("Select: ").strip().lower()
         if   c == "h": help_block("MAIN")
-        elif c == "q" or c == "7": sys.exit(0)
+        elif c == "q" or c == "8": sys.exit(0)
         elif c == "b": continue
         elif c == "1": menu_adb()
         elif c == "2": menu_fastboot()
@@ -946,6 +999,7 @@ def main():
         elif c == "4": menu_hack()
         elif c == "5": preflight()
         elif c == "6": knowledge_base_menu()
+        elif c == "7": view_recent_activity()
         elif c == "hidden": hidden_menu.open_menu()
 
 
