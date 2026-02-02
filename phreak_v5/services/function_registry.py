@@ -5,7 +5,7 @@ import hashlib
 import inspect
 import math
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Tuple, Type, Union
 
 
@@ -129,6 +129,9 @@ class FunctionContract:
             f"Control Gate: {self.control_gate}\n"
             f"Audit Trail: {self.audit_trail}"
         )
+
+
+UTC = timezone.utc
 
 
 @dataclass(slots=True)
@@ -641,4 +644,3 @@ __all__ = [
     "DocstringProtocolError",
     "TypeFidelityError",
 ]
-
