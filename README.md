@@ -4,7 +4,7 @@
 
 PHREAK v5 is a developer-grade Android operator console. It is a Rich-powered terminal UI that centralises ADB, Fastboot, MTK, and high-risk “hack arsenal” workflows under a single interactive menu. The refreshed release integrates a knowledge base, diagnostic bundle generator, and publish-ready collateral for carrier escalations.
 
-> **Heads-up:** PHREAK v5 is intentionally a terminal application. There is no separate GUI binary—the Rich console exposed by the `phreak_v5` package is the primary interface and exposes every workflow described in the source tree.
+> **Heads-up:** PHREAK v5 is terminal-first, but now also includes an optional lightweight React web cockpit (`python -m phreak_v5 --web`) for operators who want a browser control surface.
 
 ## Contents
 
@@ -23,7 +23,11 @@ PHREAK v5 is a developer-grade Android operator console. It is a Rich-powered te
    ```bash
    python -m phreak_v5
    ```
-4. **Navigate with the keyboard** – Use the numeric shortcuts shown on screen. Press `h` for contextual help, `b` to go back, and `hidden` (or `Ctrl+H` when the `keyboard` package is installed) to surface the hidden operations menu.
+4. **Optional web cockpit** – Start a lightweight React control plane that drives command dispatch:
+   ```bash
+   python -m phreak_v5 --web --host 0.0.0.0 --port 8765
+   ```
+5. **Navigate with the keyboard** – In terminal mode, use the numeric shortcuts shown on screen. Press `h` for contextual help, `b` to go back, and `hidden` (or `Ctrl+H` when the `keyboard` package is installed) to surface the hidden operations menu.
 
 Detailed menu walkthroughs live in [`docs/USAGE.md`](docs/USAGE.md).
 

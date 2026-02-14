@@ -32,6 +32,15 @@ class TelemetryBus:
 
     def emit(self, topic: str, payload: MutableMapping[str, Any]) -> None:
         event = TelemetryEvent(topic=topic, payload=payload)
+        if not self._has_subscribers_for(topic):
+            return
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(self._dispatch(event))
+            return
+
         self._queue.put_nowait(event)
         if not self._dispatcher_task:
             self._dispatcher_task = asyncio.create_task(self._dispatch_loop())
@@ -64,6 +73,9 @@ class TelemetryBus:
 
     def _has_subscribers(self) -> bool:
         return any(self._subscribers.values())
+
+    def _has_subscribers_for(self, topic: str) -> bool:
+        return bool(self._subscribers.get(topic) or self._subscribers.get("*"))
 
 
 __all__ = ["TelemetryBus"]

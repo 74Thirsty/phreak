@@ -1,9 +1,16 @@
 """Presentation layer surfaces for PHREAK v5."""
-from .curses_ui import CursesControlRoom
 from .api import AutomationAPI
-from .web import WebOperatorCockpit
+from .curses_ui import CursesControlRoom
 from .observability import ObservabilityService
-from .rich_console import main as rich_console_main
+from .web import WebOperatorCockpit
+
+
+def rich_console_main() -> None:
+    """Lazy import wrapper for the Rich console entrypoint."""
+    from .rich_console import main
+
+    main()
+
 
 __all__ = [
     "CursesControlRoom",
