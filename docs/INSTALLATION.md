@@ -30,7 +30,7 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
 PHREAK v5 relies solely on the standard library plus [`rich`](https://github.com/Textualize/rich) for its text-based UI. Install the requirement from `pyproject.toml`.
 
-```bash
+```bashl  
 pip install -r requirements.txt  # if you maintain a pinned list
 # or install manually
 pip install rich
