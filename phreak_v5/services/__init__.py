@@ -24,6 +24,7 @@ from .function_registry import (
     ValidatorReport,
 )
 from .ml import MLDiagnostics
+from .motorola_enterprise import EnrollmentPayload, MotorolaEnterpriseManager
 from .plugins import PluginRuntime
 from .unlock import UnlockCodeBreakdown, generate_unlock_code, normalize_imei
 
@@ -41,6 +42,8 @@ __all__ = [
     "ForensicLedger",
     "ForensicLedgerEntry",
     "MLDiagnostics",
+    "EnrollmentPayload",
+    "MotorolaEnterpriseManager",
     "PluginRuntime",
     "FunctionContract",
     "FunctionOntologyEntry",

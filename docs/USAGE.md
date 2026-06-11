@@ -56,9 +56,11 @@ Provides wizard-like walk-throughs for high-risk operations:
 
 ## Diagnostic Bundle Collector
 
-The diagnostic bundle collector runs a curated list of safe `adb` commands, redacts sensitive identifiers, and packages the output into a timestamped ZIP archive. Trigger it from the ADB operations menu or run programmatically via `services.diag_collector.collect_diagnostics()`.
+The diagnostic bundle collector detects authorized ADB, restricted/unauthorized ADB, fastboot, and host-only states, then packages the best available evidence into a timestamped ZIP archive. An authorized ADB connection continues to work while the screen is locked. If Android has not authorized the host or USB debugging is disabled, the bundle records that restriction and gathers non-invasive host or fastboot diagnostics instead of failing. Trigger it from the ADB operations menu or run programmatically via `services.diag_collector.collect_diagnostics()`.
 
 You will be prompted for the destination ZIP path and whether to include the full `adb bugreport` (which can be large). Progress is streamed inside the console.
+
+The **USB debugging access check** reports whether the connected host is authorized. PHREAK can open an ADB terminal on an authorized device even while its screen is locked. Android does not permit an external tool to silently enable USB debugging or authorize a new host on a secured production device; carrier deployments should authorize access during device-owner, zero-touch, or other managed enrollment.
 
 ## Knowledge Base Docs
 

@@ -23,6 +23,11 @@ KNOWLEDGE_BASE = [
     ("Android SDK telemetry sample", "Kotlin collector skeleton for apps.", DOCS_DIR / "android_sdk_sample.md"),
     ("Installation guide", "Host setup requirements and dependency list.", DOCS_DIR / "INSTALLATION.md"),
     ("Usage guide", "Menu walkthroughs and feature overview.", DOCS_DIR / "USAGE.md"),
+    (
+        "Motorola authorized access",
+        "Provision ThinkShield/Android Enterprise devices for locked-screen diagnostics.",
+        DOCS_DIR / "MOTOROLA_AUTHORIZED_ACCESS.md",
+    ),
 ]
 
 # ---------- Logging ----------
@@ -76,6 +81,7 @@ from rich.markdown import Markdown
 import threading, time, sys
 
 from services.diag_collector import collect_diagnostics
+from phreak_v5.services.motorola_enterprise import EnrollmentPayload, MotorolaEnterpriseManager
 
 console = Console()
 
@@ -232,74 +238,57 @@ def detect_screen_state():
     out, _, _ = run(f"{ADB} shell dumpsys window policy", "screen_check")
     return "isStatusBarKeyguard" in out and "true" in out
 
-def enable_debug_locked():
-    """Attempt to enable USB debugging on locked device"""
-    if not detect_screen_state():
-        print("Device is not locked")
-        return False
-    
-    print("Device is screen locked. Attempting USB debugging enable...")
-    
-    # Method 1: Try settings.db modification
-    try:
-        print("Attempting Method 1: Settings database modification")
-        run(f"{ADB} pull /data/data/com.android.providers.settings/databases/settings.db ~/settings.db", 
-            "pull_settings_db")
-        
-        # Modify settings.db
-        with Spinner("Modifying USB debug settings"):
-            run("""sqlite3 ~/settings.db <<EOF
-                UPDATE secure SET value=1 WHERE name='development_settings_enabled';
-                UPDATE secure SET value=1 WHERE name='adb_enabled';
-                EXIT;
-                EOF""", "modify_settings_db", shell=True)
-            
-            run(f"{ADB} push ~/settings.db /data/data/com.android.providers.settings/databases/", 
-                "push_settings_db")
-            os.remove("~/settings.db")
-            
-        return True
-    
-    except Exception as e:
-        print(f"Method 1 failed: {str(e)}")
-        return False
+def adb_access_state():
+    """Return the first usable ADB serial and all visible authorization states."""
+    out, err, code = run(f"{ADB} devices -l", "adb_access_check")
+    devices = []
+    for line in out.splitlines():
+        if not line.strip() or line.startswith("List of devices"):
+            continue
+        fields = line.split()
+        if len(fields) >= 2:
+            devices.append((fields[0], fields[1]))
 
-def unlock_screen():
-    """Attempt to bypass screen lock"""
-    print("Attempting screen lock bypass...")
-    
-    # Try Google FindMyDevice method
-    out, _, _ = run(f"{ADB} shell pm list packages com.google.android.gms", "check_gms")
-    if "package:" in out:
-        print("Google Play Services found. Using FindMyDevice method...")
-        # This requires user interaction with Google account
-        print("Please go to Google FindMyDevice website and:")
-        print("1. Select this device")
-        print("2. Click 'Lock'")
-        print("3. Enter temporary password")
-        input("Press Enter when done...")
+    authorized = [serial for serial, state in devices if state == "device"]
+    return (authorized[0] if authorized else None), devices, err if code else ""
+
+
+def show_usb_debugging_status():
+    """Explain the current authorized access path without claiming a bypass."""
+    serial, devices, error = adb_access_state()
+    if serial:
+        lock_state = "locked" if detect_screen_state() else "unlocked"
+        print(f"Authorized ADB access is ready for {serial}; screen is {lock_state}.")
+        print("The terminal and diagnostics can run while the screen remains locked.")
         return True
-        
-    # Try MTK-specific method if MediaTek device
-    out, _, _ = run(f"{ADB} shell getprop ro.mediatek.hardware", "check_mtk")
-    if "mtk" in out.lower():
-        print("MediaTek device detected. Using MTK method...")
-        run(f"{MTK} auth", "mtk_auth", shell=True)
-        return True
-        
+
+    if devices:
+        states = ", ".join(f"{device}: {state}" for device, state in devices)
+        print(f"ADB sees the phone but cannot open a terminal: {states}")
+        print("Authorize this host on the phone, or provision USB debugging during managed-device enrollment.")
+    else:
+        print("No ADB device detected.")
+        print("Connect an enrolled/authorized device, or use fastboot/recovery diagnostics when available.")
+        if error:
+            print(error)
     return False
 
-def enable_debug_anyway():
-    """Main function to handle locked device USB debugging"""
-    if detect_screen_state():
-        print("\033[93mWarning: Device is screen locked!\033[0m")
-        if unlock_screen():
-            print("\033[92mScreen unlocked successfully! Enabling USB debugging...\033[0m")
-            enable_debug_locked()
-        else:
-            print("\033[91mFailed to bypass screen lock.\033[0m")
-    else:
-        print("Device is not locked. Proceeding normally...")
+
+def open_adb_terminal(*, root=False):
+    """Open an interactive terminal only through an authorized ADB transport."""
+    serial, _, _ = adb_access_state()
+    if not serial:
+        show_usb_debugging_status()
+        return False
+
+    cmd = [ADB, "-s", serial, "shell"]
+    if root:
+        cmd.append("su")
+    try:
+        return subprocess.call(cmd) == 0
+    except FileNotFoundError:
+        print(f"Cannot open terminal: {ADB} is not installed.")
+        return False
 
 
 def locate_by_phone_number():
@@ -586,6 +575,142 @@ def knowledge_base_menu():
         _render_document(doc_path)
 
 
+def menu_motorola_enterprise():
+    mgr = MotorolaEnterpriseManager()
+    first_render = True
+    while True:
+        opts = [
+            ("Enrollment workflow overview", "6-step guided process for enterprise diagnostic access."),
+            ("Verify enterprise enrollment state", "Run ADB probes for device owner, developer settings, OEMConfig packages."),
+            ("Service-station authorization guide", "Prepare supported ADB or Motorola remote-support access."),
+            ("OEMConfig deployment guide", "Deploy the verified Moto OEMConfig schema through your EMM."),
+            ("EMM provider reference", "List of supported EMM/MDM platforms for Android Enterprise."),
+            ("Setup enrollment wizard", "Generate QR artifacts and walk through initial setup."),
+            ("Back", "Return to main menu."),
+        ]
+        draw("MOTOROLA ENTERPRISE", opts, first_render=first_render)
+        first_render = False
+        c = input("Select: ").strip().lower()
+        if c == "h":
+            help_block("MOTO_ENT")
+            continue
+        elif c == "b" or c == "7":
+            break
+        elif c == "1":
+            console.print("[bold cyan]Motorola Enterprise Enrollment Workflow[/bold cyan]\n")
+            for i, (title, desc) in enumerate(mgr.enrollment_steps(), 1):
+                console.print(f"[yellow]{i}. {title}[/yellow]")
+                console.print(f"   {desc}\n")
+            input("\nPress Enter to return…")
+        elif c == "2":
+            m = mode()
+            if m != "adb":
+                console.print("[red]Device must be in ADB mode for verification checks.[/red]")
+                input("\nPress Enter…")
+                continue
+            console.print("[bold cyan]Running enterprise enrollment verification…[/bold cyan]\n")
+            plan = mgr.build_verification_plan()
+            results = {}
+            for check_name, adb_cmd, _ in plan:
+                out, err, code = run(f"{ADB} {adb_cmd}", f"ent_{check_name}", shell=True)
+                results[check_name] = (out, err, code)
+            status = mgr.parse_verification_results(results)
+            all_ok = True
+            display = mgr.VERIFICATION_DISPLAY
+            for check_name in status:
+                ok = status[check_name]
+                label = display.get(check_name, check_name.replace("_", " ").title())
+                if ok:
+                    console.print(f"  [green]✓[/green] {label}")
+                else:
+                    console.print(f"  [red]✗[/red] {label}")
+                    all_ok = False
+            if all_ok:
+                console.print("\n[green]Device appears fully provisioned for enterprise diagnostics.[/green]")
+            else:
+                console.print("\n[yellow]Some checks failed. Review the Motorola authorized access doc in the knowledge base.[/yellow]")
+            input("\nPress Enter…")
+        elif c == "3":
+            console.print("[bold cyan]Service-Station Authorization[/bold cyan]\n")
+            console.print(
+                "Android Enterprise can permit developer settings, but standard EMM policy "
+                "does not silently authorize an arbitrary ADB host key."
+            )
+            console.print(
+                "\nUse one of these supported paths:\n"
+                "  1. Enable developer settings in the fully-managed EMM policy, then have "
+                "an authorized operator approve this service station before locking.\n"
+                "  2. License and deploy Motorola Moto Remote Control for approved attended "
+                "or unattended remote support.\n"
+                "  3. Obtain an OEM-supported service integration from Motorola Business."
+            )
+            input("\nPress Enter…")
+        elif c == "4":
+            console.print("[bold cyan]Moto OEMConfig Deployment[/bold cyan]\n")
+            console.print(
+                "In Managed Google Play, approve Moto OEMConfig and deploy it through "
+                "your EMM. Configure only the policy fields exposed by the Moto OEMConfig "
+                "managed-configuration schema shown in that EMM."
+            )
+            console.print(
+                "\nFeature availability varies by Motorola model and ThinkShield version. "
+                "Homologate policies on a small test group before fleet deployment."
+            )
+            input("\nPress Enter…")
+        elif c == "5":
+            console.print("[bold cyan]Supported EMM/MDM Providers[/bold cyan]\n")
+            for emm in mgr.list_emm_providers():
+                console.print(f"[yellow]{emm['name']}[/yellow]")
+                if emm["url"]:
+                    console.print(f"     {emm['url']}")
+                console.print(f"     {emm['notes']}\n")
+            input("\nPress Enter…")
+        elif c == "6":
+            console.print("[bold cyan]Motorola Initial-Setup Enrollment Wizard[/bold cyan]\n")
+            console.print(
+                "Create a fully-managed enrollment token or QR payload in your EMM first. "
+                "The phone must be new or factory-reset."
+            )
+            raw = input("\nPaste EMM QR JSON or Android Device Policy enrollment token: ").strip()
+            if not raw:
+                console.print("[yellow]No enrollment payload entered.[/yellow]")
+                input("\nPress Enter…")
+                continue
+            try:
+                payload_json = (
+                    EnrollmentPayload.validate_qr_json(raw)
+                    if raw.startswith("{")
+                    else EnrollmentPayload.from_android_device_policy_token(raw)
+                )
+                payload_path, qr_path = mgr.write_enrollment_artifacts(
+                    payload_json, Path.cwd() / "enrollment_artifacts"
+                )
+            except (ValueError, json.JSONDecodeError) as exc:
+                console.print(f"[red]Invalid enrollment data:[/red] {exc}")
+                input("\nPress Enter…")
+                continue
+            console.print(f"\n[green]Payload saved:[/green] {payload_path}")
+            if qr_path:
+                console.print(f"[green]Scannable QR saved:[/green] {qr_path}")
+            else:
+                console.print(
+                    "[yellow]No QR PNG generated. Install `qrencode` or display the QR "
+                    "provided by your EMM.[/yellow]"
+                )
+            console.print(
+                "\n[bold]On the new or factory-reset Motorola:[/bold]\n"
+                "1. Stop at the first welcome screen.\n"
+                "2. Tap the same blank area six times.\n"
+                "3. Connect to Wi-Fi when prompted.\n"
+                "4. Scan the fully-managed enrollment QR.\n"
+                "5. Complete Android Device Policy setup.\n"
+                "6. Wait for Moto OEMConfig and assigned policies to install.\n"
+                "7. Approve the PHREAK service station if your policy permits ADB.\n"
+                "8. Return here and run enterprise enrollment verification."
+            )
+            input("\nPress Enter…")
+
+
 def preflight():
     print("\n\033[96mPreflight checks\033[0m")
 
@@ -751,7 +876,14 @@ If SP Flash Tool asks for .auth, use BROM bypass instead.""",
 - Magisk Auto-Root: push stock boot.img -> patch in Magisk -> pull/flash.
 - Firmware Hunter: builds search links for the exact fingerprint/codename."""
         ,
-        "KB": """Knowledge base documents render in the console. Use arrow keys or PgUp/PgDn in your terminal to scroll, then press Enter to return."""
+        "KB": """Knowledge base documents render in the console. Use arrow keys or PgUp/PgDn in your terminal to scroll, then press Enter to return.""",
+        "MOTO_ENT": """Motorola Enterprise enrollment is required for locked-screen diagnostics on fully managed devices:
+- Workflow: overview of the 6-step process from device ownership through OEMConfig.
+- Verify: runs ADB probes to confirm device owner mode, developer settings, ADB status, and installed Motorola enterprise packages.
+- ADB keys: guide for pre-authorizing PHREAK host keys during enrollment.
+- OEMConfig: reference ThinkShield policy keys.
+- EMM: supported MDM platforms.
+- QR template: Android Enterprise JSON payload for zero-touch enrollment."""
     }
     print("\n\033[96m[HELP]\033[0m " + HELP.get(topic, "No help for this section.") + "\n")
     input("Press Enter…")
@@ -793,7 +925,7 @@ def menu_adb():
             ("Debloat (profile)", "Uninstall common bloat for user 0."),
             ("OTA sideload", "Stream update.zip to recovery."),
             ("Firmware Hunter (links)", "Build search URLs for exact firmware."),
-            ("Enable USB Debugging (locked)", "Try various methods to enable debugging"),
+            ("USB debugging access check", "Show authorization state and supported access path."),
             ("Locate contact by phone number", "Search device contacts for a number fragment."),
             ("Collect diagnostic bundle", "Generate redacted support ZIP for carriers."),
             ("Back", "Return to main menu."),
@@ -805,7 +937,7 @@ def menu_adb():
         elif c == "b": break
         elif c == "q": sys.exit(0)
         elif c == "1": print(json.dumps(info, indent=2)); input("Enter…")
-        elif c == "2": os.system(f"{ADB} shell")
+        elif c == "2": open_adb_terminal()
         elif c == "3": run(f"{ADB} reboot", "adb_reboot")
         elif c == "4": run(f"{ADB} reboot bootloader", "adb_reboot_bl"); return
         elif c == "5": adb_push_smart()
@@ -815,7 +947,7 @@ def menu_adb():
         elif c == "9": debloat()
         elif c == "10": sideload()
         elif c == "11": firmware_hunter()
-        elif c == "12": enable_debug_anyway()
+        elif c == "12": show_usb_debugging_status()
         elif c == "13": locate_by_phone_number()
         elif c == "14": collect_support_bundle_interactive()
         elif c == "15": break
@@ -924,8 +1056,7 @@ class HiddenMenu:
 
     def advanced_shell(self):
         """Interactive shell with root access"""
-        with Spinner("Starting advanced shell"):
-            run(f"{ADB} shell su", "advanced_shell", shell=True)
+        open_adb_terminal(root=True)
 
     def system_backup(self):
         """Backup system partitions"""
@@ -961,6 +1092,7 @@ def main():
             ("Fastboot operations", "Bootloader mode. Flash/backup/boot images."),
             ("MTK BROM", "MediaTek BootROM bypass via mtkclient."),
             ("Hack Arsenal (Guided)", "Wizards: fix dm-verity, unbrick MTK, root, firmware."),
+            ("Motorola Enterprise", "Enroll devices for locked-screen diagnostic access via EMM/OEMConfig."),
             ("Preflight Check", "Check tools/drivers/devices before you start."),
             ("Knowledge base library", "Cheat sheets, templates, SDK samples."),
             ("Quit", "Exit the console.")
@@ -970,14 +1102,15 @@ def main():
         first_render = False
         c = input("Select: ").strip().lower()
         if   c == "h": help_block("MAIN")
-        elif c == "q" or c == "7": sys.exit(0)
+        elif c == "q" or c == "8": sys.exit(0)
         elif c == "b": continue
         elif c == "1": menu_adb()
         elif c == "2": menu_fastboot()
         elif c == "3": menu_mtk()
         elif c == "4": menu_hack()
-        elif c == "5": preflight()
-        elif c == "6": knowledge_base_menu()
+        elif c == "5": menu_motorola_enterprise()
+        elif c == "6": preflight()
+        elif c == "7": knowledge_base_menu()
         elif c == "hidden": hidden_menu.open_menu()
 
 

@@ -27,6 +27,7 @@ from .services.enrollment import DeviceRegistry
 from .services.firmware import FirmwareSuite
 from .services.forensics import ForensicsHub
 from .services.ml import MLDiagnostics
+from .services.motorola_enterprise import MotorolaEnterpriseManager
 from .services.plugins import PluginRuntime
 from .telemetry import TelemetryBus
 
@@ -46,6 +47,7 @@ class ControlTowerComponents:
     firmware_suite: FirmwareSuite
     backup_engine: BackupSyncEngine
     ml_diagnostics: MLDiagnostics
+    motorola_enterprise: MotorolaEnterpriseManager
     plugin_runtime: PluginRuntime
     telemetry: TelemetryBus
 
@@ -106,6 +108,7 @@ class PhreakControlTower:
             storage_path=self.config.paths.backup_store,
         )
         self.ml_diagnostics = MLDiagnostics(telemetry=self.telemetry)
+        self.motorola_enterprise = MotorolaEnterpriseManager()
         self.plugin_runtime = PluginRuntime(
             search_paths=list(self.config.paths.plugin_roots),
             telemetry=self.telemetry,
@@ -126,6 +129,7 @@ class PhreakControlTower:
             firmware_suite=self.firmware_suite,
             backup_engine=self.backup_engine,
             ml_diagnostics=self.ml_diagnostics,
+            motorola_enterprise=self.motorola_enterprise,
             plugin_runtime=self.plugin_runtime,
             telemetry=self.telemetry,
         )
