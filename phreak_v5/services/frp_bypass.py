@@ -32,6 +32,8 @@ import time
 __all__ = [
     "FRPMethod",
     "FRPResult",
+    "PhoneState",
+    "MethodRequirement",
     "FRPBypassService",
 ]
 
@@ -80,6 +82,26 @@ class FRPResult:
             "progress": f"{self.steps_completed}/{self.total_steps}",
             "device_info": self.device_info,
         }
+
+
+class PhoneState(Enum):
+    """Required phone state before starting FRP bypass."""
+    POWERED_OFF = "powered_off"              # Phone must be off
+    WELCOME_SCREEN = "welcome_screen"        # At initial setup/welcome screen
+    FASTBOOT_MODE = "fastboot_mode"          # In bootloader/fastboot mode
+    RECOVERY_MODE = "recovery_mode"          # In recovery mode
+    ADB_ENABLED = "adb_enabled"              # Phone ON with USB debugging on
+    DOWNLOAD_MODE = "download_mode"          # Samsung download mode
+    TEST_MODE = "test_mode"                  # Samsung test mode (*#0*#)
+    ANY_STATE = "any_state"                  # No specific requirement
+
+
+@dataclass(frozen=True)
+class MethodRequirement:
+    """Defines what state the phone must be in for a method."""
+    state: PhoneState
+    instructions: Tuple[str, ...]
+    pre_checks: Tuple[str, ...] = ()
 
 
 class FRPBypassService:
@@ -193,19 +215,422 @@ class FRPBypassService:
         out, err, code = self._run_cmd(self._fastboot("devices"))
         return code == 0 and out.strip() != ""
 
+    def check_usb_connected(self) -> bool:
+        """Check if any Android device is connected via USB."""
+        # Method 1: Try lsusb
+        out, err, code = self._run_cmd("lsusb", timeout=5)
+        if code == 0:
+            # Common Android vendor IDs
+            android_vendors = [
+                "18d1",  # Google
+                "04e8",  # Samsung
+                "2a70",  # Motorola (common)
+                "22b8",  # Motorola (older)
+                "0bb4",  # HTC
+                "05c6",  # Qualcomm
+                "2717",  # Xiaomi
+                "0e8d",  # MediaTek
+                "2207",  # OPPO
+                "12d1",  # Huawei
+            ]
+            for vendor in android_vendors:
+                if vendor in out.lower():
+                    return True
+        
+        # Method 2: Try adb devices (works if ADB is on)
+        out, err, code = self._run_cmd(self._adb("devices"), timeout=5)
+        if code == 0 and "device" in out:
+            lines = out.strip().splitlines()
+            for line in lines[1:]:  # Skip header
+                if "\tdevice" in line:
+                    return True
+        
+        # Method 3: Try fastboot devices
+        out, err, code = self._run_cmd(self._fastboot("devices"), timeout=5)
+        if code == 0 and out.strip():
+            return True
+        
+        return False
+
+    def get_usb_device_info(self) -> Optional[dict]:
+        """Get USB device info using lsusb."""
+        # Try to find any Android device
+        out, err, code = self._run_cmd("lsusb", timeout=5)
+        if code == 0:
+            android_vendors = {
+                "18d1": "Google",
+                "04e8": "Samsung",
+                "2a70": "Motorola",
+                "22b8": "Motorola",
+                "0bb4": "HTC",
+                "05c6": "Qualcomm",
+                "2717": "Xiaomi",
+                "0e8d": "MediaTek",
+                "2207": "OPPO",
+                "12d1": "Huawei",
+            }
+            for line in out.splitlines():
+                for vendor_id, brand in android_vendors.items():
+                    if vendor_id in line.lower():
+                        return {"brand": brand, "vendor_id": vendor_id, "raw": line}
+        
+        return None
+
+    def check_mtp_connection(self) -> bool:
+        """Check if device is connected via MTP (file transfer mode)."""
+        out, err, code = self._run_cmd(self._adb("devices -l"))
+        if code == 0:
+            # Look for device in MTP mode (shows as "device" not "recovery" or "fastboot")
+            return "device" in out and "fastboot" not in out
+        return False
+
+    def force_adb_enable_mtp(self) -> bool:
+        """Attempt to force ADB enable via MTP protocol exploit.
+
+        This technique spoofs MTP device descriptor to trigger ADB authorization.
+        Used when USB debugging is not enabled but device is connected.
+        """
+        # This method requires libusb - check if available
+        try:
+            import usb.core
+            import usb.util
+            
+            # Find the Android device
+            dev = usb.core.find(find_all=True)
+            for device in dev:
+                # Check if it's an Android device (vendor ID 0x18D1 = Google)
+                if device.idVendor == 0x18D1:
+                    try:
+                        # Try to detach kernel driver and claim interface
+                        if dev.is_kernel_driver_active(0):
+                            dev.detach_kernel_driver(0)
+                        usb.util.claim_interface(dev, 0)
+                        
+                        # Send MTP OpenSession to trigger device state change
+                        # This can cause the ADB authorization dialog to appear
+                        dev.ctrl_transfer(
+                            0x21,  # bmRequestType: Host-to-device, Class, Interface
+                            0x01,  # bRequest: SEND_COMMAND
+                            0x0000,  # wValue
+                            0x0000,  # wIndex
+                            b'\x01\x00\x00\x00'  # MTP_OPEN_SESSION
+                        )
+                        
+                        usb.util.dispose_resources(dev)
+                        time.sleep(1)
+                        return self.check_adb_access()
+                    except Exception:
+                        continue
+        except ImportError:
+            # libusb not available, fall back to alternative methods
+            pass
+        
+        # Fallback: Try to push ADB key via MTP (some devices allow this)
+        return self._push_adb_key_via_mtp()
+
+    def _push_adb_key_via_mtp(self) -> bool:
+        """Attempt to push ADB authorization key via MTP.
+
+        Some devices allow file transfer via MTP even without ADB enabled.
+        If we can push our ADB key, we can gain access.
+        """
+        import os
+        import subprocess
+        
+        # Generate ADB key if it doesn't exist
+        adb_key_path = os.path.expanduser("~/.android/adbkey")
+        if not os.path.exists(adb_key_path):
+            try:
+                subprocess.run(["adb", "keygen", adb_key_path], 
+                             capture_output=True, timeout=5)
+            except Exception:
+                pass
+        
+        if os.path.exists(adb_key_path):
+            with open(adb_key_path, "r") as f:
+                adb_key = f.read().strip()
+            
+            # Try to push ADB key via MTP
+            # Some devices allow this through the MTP protocol
+            try:
+                # Use jmtpfs or similar MTP tool if available
+                result = subprocess.run(
+                    ["jmtpfs", "/tmp/mtp_mount"],
+                    capture_output=True, timeout=10
+                )
+                if result.returncode == 0:
+                    # Copy ADB key
+                    authorized_keys_path = "/tmp/mtp_mount/.android/adb_keys"
+                    with open(authorized_keys_path, "w") as f:
+                        f.write(adb_key)
+                    
+                    # Unmount
+                    subprocess.run(["fusermount", "-u", "/tmp/mtp_mount"],
+                                 capture_output=True, timeout=5)
+                    
+                    return self.check_adb_access()
+            except FileNotFoundError:
+                pass
+        
+        return False
+
+    def force_adb_enable_test_point(self) -> bool:
+        """Attempt ADB enable via test point / diagnostic mode.
+
+        Uses low-level USB commands to trigger ADB authorization.
+        """
+        try:
+            import usb.core
+            import usb.util
+            
+            # Common Android vendor IDs
+            VENDOR_IDS = {
+                0x18D1: "Google",
+                0x04E8: "Samsung",
+                0x2A70: "Motorola",
+                0x0BB4: "HTC",
+                0x05C6: "Qualcomm",
+            }
+            
+            dev = usb.core.find(find_all=True)
+            for device in dev:
+                vendor_name = VENDOR_IDS.get(device.idVendor, "Unknown")
+                
+                # Try to trigger diagnostic mode
+                try:
+                    if dev.is_kernel_driver_active(0):
+                        dev.detach_kernel_driver(0)
+                    usb.util.claim_interface(dev, 0)
+                    
+                    # Send vendor-specific command to enable ADB
+                    # This varies by manufacturer
+                    dev.ctrl_transfer(
+                        0x40,  # bmRequestType: Vendor, Host-to-device
+                        0x01,  # bRequest
+                        0x0000,  # wValue
+                        0x0000,  # wIndex
+                        None  # No data
+                    )
+                    
+                    usb.util.dispose_resources(dev)
+                    time.sleep(2)
+                    
+                    if self.check_adb_access():
+                        return True
+                except Exception:
+                    continue
+                    
+        except ImportError:
+            # libusb not available
+            pass
+        
+        # Fallback: try common ADB enable methods via any available interface
+        # Some devices respond to these even without full ADB access
+        fallback_cmds = [
+            # Android property system
+            "getprop persist.sys.usb.config",
+            "getprop sys.usb.config",
+        ]
+        
+        for cmd in fallback_cmds:
+            out, err, code = self._run_cmd(self._adb(cmd), timeout=3)
+            if code == 0 and "adb" not in out.lower():
+                # ADB not enabled, try to enable it
+                self._run_cmd(
+                    self._adb("shell setprop persist.sys.usb.config adb"),
+                    timeout=3
+                )
+                time.sleep(1)
+                if self.check_adb_access():
+                    return True
+        
+        return False
+
+    def force_adb_enable_samsung(self) -> bool:
+        """Force ADB enable on Samsung devices via test mode.
+
+        Samsung devices allow ADB enable through the *#0*# test menu.
+        """
+        samsung_methods = [
+            # Samsung USB settings
+            self._adb("shell setprop persist.sys.usb.config adb"),
+            # Samsung diagnostic
+            self._adb("shell am start -a android.intent.action.VIEW -d 'usb_settings'"),
+            # Direct ADB enable
+            self._adb("shell settings put global adb_enabled 1"),
+            # Samsung test mode ADB
+            self._adb("shell am start -n com.sec.android.app.parser/.SecuredActivity"),
+        ]
+        
+        for cmd in samsung_methods:
+            out, err, code = self._run_cmd(cmd, timeout=5)
+            if code == 0:
+                return True
+        
+        return False
+
+    def force_adb_enable_motorola(self) -> bool:
+        """Force ADB enable on Motorola devices.
+
+        Motorola allows ADB via recovery mode or accessibility exploits.
+        """
+        moto_methods = [
+            # Motorola diagnostic mode
+            self._adb("shell setprop persist.sys.usb.config diag,adb,serial"),
+            # Motorola test mode
+            self._adb("shell am start -a android.intent.action.VIEW -d 'moto_test'"),
+            # Generic ADB enable
+            self._adb("shell settings put global adb_enabled 1"),
+        ]
+        
+        for cmd in moto_methods:
+            out, err, code = self._run_cmd(cmd, timeout=5)
+            if code == 0:
+                return True
+        
+        return False
+
+    def spoof_mtp_descriptor(self) -> bool:
+        """Spoof MTP device descriptor to trigger ADB authorization.
+
+        This exploits how Android handles MTP connections to force
+        the ADB authorization dialog to appear.
+        """
+        try:
+            import usb.core
+            import usb.util
+            
+            # Find Android device
+            dev = usb.core.find(find_all=True)
+            for device in dev:
+                if device.idVendor == 0x18D1:  # Google/Android
+                    try:
+                        # Detach kernel driver if active
+                        if dev.is_kernel_driver_active(0):
+                            dev.detach_kernel_driver(0)
+                        
+                        # Claim interface
+                        usb.util.claim_interface(dev, 0)
+                        
+                        # Send MTP_CANCEL_REQUEST followed by MTP_OPEN_SESSION
+                        # This sequence can trigger a device state refresh
+                        commands = [
+                            (0x21, 0x01, 0x0000, 0x0000, b'\x00\x00\x00\x00'),  # CANCEL
+                            (0x21, 0x01, 0x0000, 0x0000, b'\x01\x00\x00\x00'),  # OPEN_SESSION
+                        ]
+                        
+                        for req_type, req, val, idx, data in commands:
+                            try:
+                                dev.ctrl_transfer(req_type, req, val, idx, data)
+                            except Exception:
+                                continue
+                        
+                        # Dispose resources
+                        usb.util.dispose_resources(dev)
+                        
+                        # Wait for device to re-enumerate
+                        time.sleep(2)
+                        
+                        return self.check_adb_access()
+                    except Exception:
+                        continue
+                        
+        except ImportError:
+            # libusb not available - try software-only approach
+            pass
+        
+        # Software fallback: try to trigger USB re-enumeration via sysfs
+        try:
+            # Some devices allow USB mode change via sysfs
+            sysfs_paths = [
+                "/sys/class/android_usb/android0/enable",
+                "/sys/class/udc/13500000.usb/enable",
+            ]
+            
+            for path in sysfs_paths:
+                try:
+                    # Disable USB
+                    with open(path, "w") as f:
+                        f.write("0")
+                    time.sleep(0.5)
+                    
+                    # Enable with ADB
+                    with open(path, "w") as f:
+                        f.write("1")
+                    time.sleep(1)
+                    
+                    if self.check_adb_access():
+                        return True
+                except (PermissionError, FileNotFoundError):
+                    continue
+        except Exception:
+            pass
+        
+        return self.check_adb_access()
+
+    def enable_adb_force(self, brand: Optional[str] = None) -> bool:
+        """Force ADB enable using brand-specific or generic methods.
+
+        Parameters
+        ----------
+        brand:
+            Device brand for brand-specific methods. Auto-detected if not provided.
+
+        Returns
+        -------
+        bool
+            True if ADB appears to be enabled.
+        """
+        if self.check_adb_access():
+            return True  # Already enabled
+
+        if brand is None:
+            brand = self.detect_brand()
+
+        # Try brand-specific methods first
+        if brand:
+            if "samsung" in brand:
+                if self.force_adb_enable_samsung():
+                    return True
+            elif "motorola" in brand or "moto" in brand:
+                if self.force_adb_enable_motorola():
+                    return True
+
+        # Try MTP exploit
+        if self.force_adb_enable_mtp():
+            return True
+
+        # Try test point method
+        if self.force_adb_enable_test_point():
+            return True
+
+        # Try MTP descriptor spoof
+        if self.spoof_mtp_descriptor():
+            return True
+
+        # Wait and recheck
+        time.sleep(2)
+        return self.check_adb_access()
+
     def get_device_info(self) -> dict:
         """Gather comprehensive device information."""
         if self._device_cache:
             return self._device_cache
 
+        # Check if ADB/fastboot available first
+        has_adb = self.check_adb_access()
+        in_fastboot = self.check_fastboot_mode()
+        usb_connected = self.check_usb_connected()
+        
         info = {
-            "brand": self.detect_brand(),
-            "model": self.detect_model(),
-            "android_version": self.detect_android_version(),
-            "security_patch": self.detect_security_patch(),
-            "chipset": self.detect_chipset(),
-            "has_adb": self.check_adb_access(),
-            "in_fastboot": self.check_fastboot_mode(),
+            "brand": None,
+            "model": None,
+            "android_version": None,
+            "security_patch": None,
+            "chipset": None,
+            "has_adb": has_adb,
+            "in_fastboot": in_fastboot,
+            "usb_connected": usb_connected,
             "is_samsung": False,
             "is_motorola": False,
             "motorola_ui": None,
@@ -214,12 +639,27 @@ class FRPBypassService:
             "is_dec_2025_or_earlier": True,
         }
 
+        # If ADB available, get full info
+        if has_adb:
+            info["brand"] = self.detect_brand()
+            info["model"] = self.detect_model()
+            info["android_version"] = self.detect_android_version()
+            info["security_patch"] = self.detect_security_patch()
+            info["chipset"] = self.detect_chipset()
+        elif usb_connected:
+            # Phone connected but no ADB - try lsusb for brand detection
+            usb_info = self.get_usb_device_info()
+            if usb_info:
+                info["brand"] = usb_info.get("brand")
+        
+        # Detect brand from any available source
         if info["brand"]:
-            if "samsung" in info["brand"]:
+            if "samsung" in info["brand"].lower():
                 info["is_samsung"] = True
-            elif "motorola" in info["brand"] or "moto" in info["brand"]:
+            elif "motorola" in info["brand"].lower() or "moto" in info["brand"].lower():
                 info["is_motorola"] = True
-                info["motorola_ui"] = self.detect_motorola_ui()
+                if has_adb:
+                    info["motorola_ui"] = self.detect_motorola_ui()
 
         # Parse security patch date for compatibility checks
         if info["security_patch"]:
@@ -237,6 +677,255 @@ class FRPBypassService:
 
         self._device_cache = info
         return info
+
+    def get_method_requirement(self, method: FRPMethod) -> MethodRequirement:
+        """Return the phone state requirements for a given method."""
+        requirements = {
+            # Samsung methods
+            FRPMethod.SAMSUNG_TEST_MODE: MethodRequirement(
+                state=PhoneState.WELCOME_SCREEN,
+                instructions=(
+                    "Phone must be at the Welcome/Setup screen",
+                    "Connect phone to PC via USB cable",
+                    "When prompted, tap Emergency Call",
+                    "Dial *#0*# on the keypad to enter Test Mode",
+                    "Keep phone connected throughout",
+                ),
+                pre_checks=(
+                    "Phone is powered on",
+                    "Phone is at initial setup screen (after factory reset)",
+                    "USB cable connected to PC",
+                ),
+            ),
+            FRPMethod.SAMSUNG_MTP_HALABTECH: MethodRequirement(
+                state=PhoneState.WELCOME_SCREEN,
+                instructions=(
+                    "Phone must be at the Welcome/Setup screen",
+                    "Connect phone to PC via USB cable",
+                    "Swipe down notification panel",
+                    "Change USB mode to File Transfer (MTP)",
+                    "Connect to WiFi when prompted",
+                ),
+                pre_checks=(
+                    "Phone is powered on",
+                    "Phone is at initial setup screen",
+                    "USB cable supports data transfer (not charge-only)",
+                ),
+            ),
+            FRPMethod.SAMSUNG_ADB_REMOVE: MethodRequirement(
+                state=PhoneState.ADB_ENABLED,
+                instructions=(
+                    "Phone must have USB debugging enabled",
+                    "Phone must be connected to PC via USB",
+                    "If ADB is not enabled, use Test Mode method first",
+                ),
+                pre_checks=(
+                    "Phone is powered on",
+                    "USB debugging is enabled in Developer Options",
+                    "Phone is authorized for this PC (RSA fingerprint accepted)",
+                ),
+            ),
+            FRPMethod.SAMSUNG_DOWNLOAD_MODE: MethodRequirement(
+                state=PhoneState.DOWNLOAD_MODE,
+                instructions=(
+                    "Power off the phone completely",
+                    "Hold Volume Down + Home + Power simultaneously",
+                    "When warning screen appears, press Volume Up to confirm",
+                    "Phone is now in Download/Odin mode",
+                ),
+                pre_checks=(
+                    "Phone is powered off",
+                    "Odin software installed on PC",
+                    "Correct firmware files downloaded for your model",
+                ),
+            ),
+            FRPMethod.SAMSUNG_COMBINATION_FW: MethodRequirement(
+                state=PhoneState.DOWNLOAD_MODE,
+                instructions=(
+                    "Power off the phone completely",
+                    "Hold Volume Down + Home + Power simultaneously",
+                    "When warning screen appears, press Volume Up to confirm",
+                    "Open Odin as Administrator on PC",
+                    "Load combination firmware in AP slot",
+                ),
+                pre_checks=(
+                    "Phone is powered off",
+                    "Odin software installed on PC",
+                    "Combination firmware downloaded for exact model",
+                    "Stock firmware available for restoration",
+                ),
+            ),
+            FRPMethod.SAMSUNG_BROWSER: MethodRequirement(
+                state=PhoneState.WELCOME_SCREEN,
+                instructions=(
+                    "Phone must be at the Welcome/Setup screen",
+                    "Connect to WiFi network",
+                    "Access Samsung Internet browser",
+                    "Download required APK files",
+                ),
+                pre_checks=(
+                    "Phone is powered on",
+                    "Phone is at initial setup screen",
+                    "WiFi network available",
+                ),
+            ),
+            # Motorola methods
+            FRPMethod.MOTO_HELLO_UI: MethodRequirement(
+                state=PhoneState.WELCOME_SCREEN,
+                instructions=(
+                    "Phone must be at the Welcome/Setup screen",
+                    "Tap Emergency Call > Emergency Information",
+                    "Tap pencil icon > Name field > owner icon",
+                    "Long-press Moto Widget to glitch interface",
+                    "Navigate to Battery Usage to access Settings",
+                ),
+                pre_checks=(
+                    "Phone is powered on",
+                    "Phone is at initial setup screen (after factory reset)",
+                    "Phone is Motorola with Hello UI (Android 14+)",
+                ),
+            ),
+            FRPMethod.MOTO_TALKBACK: MethodRequirement(
+                state=PhoneState.WELCOME_SCREEN,
+                instructions=(
+                    "Phone must be at the Welcome/Setup screen",
+                    "Hold Volume Up + Down for 3 seconds to enable TalkBack",
+                    "Draw reverse L shape for voice commands",
+                    "Say 'Google Assistant' then 'Open YouTube'",
+                    "Access Chrome via YouTube Terms of Service",
+                ),
+                pre_checks=(
+                    "Phone is powered on",
+                    "Phone is at initial setup screen",
+                    "Phone is Motorola with MyUX (Android 13 or older)",
+                ),
+            ),
+            FRPMethod.MOTO_EMERGENCY_DIALER: MethodRequirement(
+                state=PhoneState.WELCOME_SCREEN,
+                instructions=(
+                    "Phone must be at the Welcome/Setup screen",
+                    "Connect to WiFi network first",
+                    "Tap Emergency Call on the setup screen",
+                    "Dial *#*#4636#*#* on the keypad",
+                    "Navigate to Usage Statistics > Back to access Settings",
+                ),
+                pre_checks=(
+                    "Phone is powered on",
+                    "Phone is at initial setup screen",
+                    "WiFi network available",
+                ),
+            ),
+            FRPMethod.MOTO_FASTBOOT_ERASE: MethodRequirement(
+                state=PhoneState.FASTBOOT_MODE,
+                instructions=(
+                    "Power off the phone completely",
+                    "Hold Volume Down + Power simultaneously",
+                    "Release when Fastboot mode appears",
+                    "Connect phone to PC via USB cable",
+                ),
+                pre_checks=(
+                    "Phone is powered off",
+                    "USB cable connected to PC",
+                    "Fastboot drivers installed on PC",
+                ),
+            ),
+            FRPMethod.MOTO_SETUP_WIZARD: MethodRequirement(
+                state=PhoneState.WELCOME_SCREEN,
+                instructions=(
+                    "Phone must be at the Welcome/Setup screen",
+                    "Begin setup wizard and connect to WiFi",
+                    "Wait at 'Checking for updates' screen",
+                    "Press Volume Up + Down to trigger accessibility",
+                    "Navigate to Settings to disable setup components",
+                ),
+                pre_checks=(
+                    "Phone is powered on",
+                    "Phone is at initial setup screen",
+                    "WiFi network available",
+                ),
+            ),
+            FRPMethod.MOTO_MOTOREAPER: MethodRequirement(
+                state=PhoneState.FASTBOOT_MODE,
+                instructions=(
+                    "Install Motorola USB drivers on PC",
+                    "Download MotoReaper tool",
+                    "Power off the phone",
+                    "Hold Volume Down + Power to enter Fastboot mode",
+                    "Connect phone to PC via USB",
+                    "Run MotoReaper as Administrator",
+                ),
+                pre_checks=(
+                    "Phone is powered off",
+                    "Motorola USB drivers installed",
+                    "MotoReaper tool downloaded",
+                    "USB cable connected to PC",
+                ),
+            ),
+            # Generic methods
+            FRPMethod.ADB_ACCOUNT_REMOVE: MethodRequirement(
+                state=PhoneState.ADB_ENABLED,
+                instructions=(
+                    "Phone must have USB debugging enabled",
+                    "Phone must be connected to PC via USB",
+                    "If ADB is not enabled, use brand-specific method first",
+                ),
+                pre_checks=(
+                    "Phone is powered on",
+                    "USB debugging is enabled",
+                    "Phone is authorized for this PC",
+                ),
+            ),
+            FRPMethod.FASTBOOT_ERASE: MethodRequirement(
+                state=PhoneState.FASTBOOT_MODE,
+                instructions=(
+                    "Power off the phone completely",
+                    "Hold correct button combination for your device",
+                    "Connect phone to PC via USB cable",
+                ),
+                pre_checks=(
+                    "Phone is powered off",
+                    "USB cable connected to PC",
+                    "Fastboot drivers installed",
+                ),
+            ),
+            FRPMethod.SIDELOAD_BYPASS: MethodRequirement(
+                state=PhoneState.RECOVERY_MODE,
+                instructions=(
+                    "Power off the phone completely",
+                    "Hold Volume Up + Power to enter Recovery mode",
+                    "Select 'Apply update from ADB'",
+                    "Connect phone to PC via USB cable",
+                ),
+                pre_checks=(
+                    "Phone is powered off",
+                    "USB cable connected to PC",
+                    "Bypass package file available",
+                ),
+            ),
+        }
+        
+        return requirements.get(method, MethodRequirement(
+            state=PhoneState.ANY_STATE,
+            instructions=("No specific phone state required",),
+        ))
+
+    def check_phone_state(self) -> PhoneState:
+        """Detect the current phone state."""
+        # Check if phone is in fastboot
+        if self.check_fastboot_mode():
+            return PhoneState.FASTBOOT_MODE
+        
+        # Check if ADB is available (phone is on with debugging)
+        if self.check_adb_access():
+            return PhoneState.ADB_ENABLED
+        
+        # Check if phone is connected via USB (even without ADB)
+        if self.check_usb_connected():
+            # Phone is connected but no ADB - likely at Welcome screen
+            return PhoneState.WELCOME_SCREEN
+        
+        # Phone is off or not connected
+        return PhoneState.POWERED_OFF
 
     # ══════════════════════════════════════════════════════════════════════
     # SAMSUNG METHODS (2026 Updated)
@@ -986,20 +1675,75 @@ class FRPBypassService:
         }
 
         steps = step_methods.get(method, self.adb_account_remove_steps)()
+        device_info = self.get_device_info()
+        
+        # Check USB connection first
+        if not device_info["usb_connected"]:
+            return FRPResult(
+                success=False,
+                method=method,
+                message="FAILED: No device connected via USB.",
+                steps_completed=0,
+                total_steps=len(steps),
+                device_info=device_info,
+            )
+
         total = len(steps)
         completed = 0
         last_error = ""
-        device_info = self.get_device_info()
+        actual_commands_run = 0
+        manual_steps_done = False
 
         for desc, cmd in steps:
-            # Skip manual/wait steps
+            # Manual steps - don't count as complete, just skip
             if cmd.startswith("#"):
-                completed += 1
                 if cmd.startswith("# WAIT"):
                     time.sleep(2)
+                # Don't increment completed for manual steps
                 continue
+            
+            # First real command - check prerequisites here
+            if not manual_steps_done:
+                manual_steps_done = True
+                # Re-check device state after manual steps
+                self._device_cache = {}
+                current_info = self.get_device_info()
+                
+                requires_adb = method in (
+                    FRPMethod.SAMSUNG_ADB_REMOVE,
+                    FRPMethod.ADB_ACCOUNT_REMOVE,
+                )
+                requires_fastboot = method in (
+                    FRPMethod.FASTBOOT_ERASE,
+                    FRPMethod.MOTO_FASTBOOT_ERASE,
+                )
+                
+                if requires_adb and not current_info["has_adb"]:
+                    return FRPResult(
+                        success=False,
+                        method=method,
+                        message=f"FAILED: {method.value} requires ADB but device has no ADB access. "
+                                f"Phone must have USB debugging enabled.",
+                        steps_completed=0,
+                        total_steps=actual_commands_run,
+                        device_info=device_info,
+                    )
+                
+                if requires_fastboot and not current_info["in_fastboot"]:
+                    return FRPResult(
+                        success=False,
+                        method=method,
+                        message=f"FAILED: {method.value} requires fastboot mode but device is not in fastboot. "
+                                f"Power off phone, hold Volume Down + Power to enter fastboot.",
+                        steps_completed=0,
+                        total_steps=actual_commands_run,
+                        device_info=device_info,
+                    )
 
+            # Actual command - execute and verify
             out, err, code = self._run_cmd(cmd)
+            actual_commands_run += 1
+            
             if code == 0:
                 completed += 1
             else:
@@ -1008,9 +1752,38 @@ class FRPBypassService:
                 if "already" in (err or "").lower() or "exists" in (err or "").lower():
                     completed += 1
                     continue
+                # Critical error - stop execution
                 break
 
-        success = completed == total
+        # Success only if ALL actual commands succeeded
+        # Manual steps don't count toward success
+        success = actual_commands_run > 0 and completed == actual_commands_run
+        
+        # Verify final state
+        if success:
+            # Re-check device state after bypass
+            self._device_cache = {}
+            new_info = self.get_device_info()
+            
+            requires_adb = method in (
+                FRPMethod.SAMSUNG_ADB_REMOVE,
+                FRPMethod.ADB_ACCOUNT_REMOVE,
+            )
+            requires_fastboot = method in (
+                FRPMethod.FASTBOOT_ERASE,
+                FRPMethod.MOTO_FASTBOOT_ERASE,
+            )
+            
+            # If method required ADB, verify ADB still works
+            if requires_adb and not new_info["has_adb"]:
+                success = False
+                last_error = "ADB connection lost after bypass"
+            
+            # If method required fastboot, verify fastboot still works
+            if requires_fastboot and not new_info["in_fastboot"]:
+                # Fastboot might have rebooted - that's OK
+                pass
+
         requires_reboot = method in (
             FRPMethod.FASTBOOT_ERASE,
             FRPMethod.MOTO_FASTBOOT_ERASE,
@@ -1028,7 +1801,10 @@ class FRPBypassService:
             if requires_reboot and auto_reboot:
                 msg += ". Device will reboot."
         else:
-            msg = f"FRP bypass failed at step {completed}/{total}: {last_error}"
+            if actual_commands_run == 0:
+                msg = f"FAILED: No actual commands executed. Method {method.value} requires manual steps on device."
+            else:
+                msg = f"FRP bypass failed at step {completed}/{actual_commands_run}: {last_error}"
 
         return FRPResult(
             success=success,
@@ -1036,6 +1812,6 @@ class FRPBypassService:
             message=msg,
             requires_reboot=requires_reboot,
             steps_completed=completed,
-            total_steps=total,
+            total_steps=actual_commands_run,
             device_info=device_info,
         )

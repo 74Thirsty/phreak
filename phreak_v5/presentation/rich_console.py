@@ -726,15 +726,17 @@ def preflight():
         ),
         "avbtool": (
             "avbtool",
-            f"{sys.executable} -m pip install --user avbtool 2>/dev/null || "
-            f"sudo apt-get install -y avbtool 2>/dev/null || "
-            f"{sys.executable} -m pip install --user --break-system-packages avbtool"
+            "uv tool install avbtool 2>/dev/null || "
+            "uv pip install avbtool 2>/dev/null || "
+            "sudo apt-get install -y avbtool 2>/dev/null || "
+            "pip install --user avbtool"
         ),
         "mtk": (
             "mtk",
             "if [ -d ~/Apps/mtkclient ]; then cd ~/Apps/mtkclient && git pull; "
             "else git clone https://github.com/bkerler/mtkclient.git ~/Apps/mtkclient; fi && "
-            "cd ~/Apps/mtkclient && python3 -m pip install --user -r requirements.txt"
+            "cd ~/Apps/mtkclient && uv pip install -r requirements.txt 2>/dev/null || "
+            "cd ~/Apps/mtkclient && pip install --user -r requirements.txt"
         ),
     }
 
@@ -854,7 +856,7 @@ def hack_frp_bypass():
     
     2026 Updated: Includes patch-level detection and compatibility notes.
     """
-    from phreak_v5.services.frp_bypass import FRPBypassService, FRPMethod
+    from phreak_v5.services.frp_bypass import FRPBypassService, FRPMethod, PhoneState
     
     console.print(Panel("[bold cyan]FRP Bypass Wizard (2026 Updated)[/bold cyan]",
                         subtitle="Factory Reset Protection Removal - Samsung & Motorola",
@@ -1033,21 +1035,67 @@ def hack_frp_bypass():
     
     console.print(f"\n[bold yellow]Selected: {method_name}[/bold yellow]")
     
+    # Show phone state requirements
+    requirement = svc.get_method_requirement(selected_method)
+    current_state = svc.check_phone_state()
+    
+    console.print(f"\n[bold cyan]PHONE STATE REQUIRED:[/bold cyan]")
+    console.print(f"  Current: [yellow]{current_state.value}[/yellow]")
+    console.print(f"  Required: [yellow]{requirement.state.value}[/yellow]")
+    
+    # Show pre-checks
+    if requirement.pre_checks:
+        console.print("\n[bold cyan]PRE-FLIGHT CHECKS:[/bold cyan]")
+        for check in requirement.pre_checks:
+            console.print(f"  [dim]✓ {check}[/dim]")
+    
+    # Show instructions
+    console.print("\n[bold cyan]INSTRUCTIONS (do these first):[/bold cyan]")
+    for i, instr in enumerate(requirement.instructions, 1):
+        console.print(f"  [cyan]{i}.[/cyan] {instr}")
+    
     # Show patch-specific warnings
     if is_samsung and info.get("is_jan_2026_or_later"):
         if selected_method in (FRPMethod.SAMSUNG_TEST_MODE, FRPMethod.SAMSUNG_MTP_HALABTECH):
-            console.print("[bold red]WARNING: Device has Jan 2026+ patch.[/bold red]")
+            console.print("\n[bold red]WARNING: Device has Jan 2026+ patch.[/bold red]")
             console.print("[dim]This method may fail. Consider Combination Firmware flash instead.[/dim]")
     
-    if not in_fastboot and not has_adb:
-        console.print("[bold yellow]NOTE: No ADB or fastboot access detected.[/bold yellow]")
-        console.print("[dim]Some methods require manual steps on the device (dialer codes, TalkBack, etc).[/dim]")
+    # Check if phone is in correct state and try to force if needed
+    if requirement.state != PhoneState.ANY_STATE:
+        if current_state != requirement.state:
+            console.print(f"\n[bold yellow]Phone not in correct state. Attempting force ADB enable...[/bold yellow]")
+            
+            with Spinner("Trying MTP exploit, test point, and descriptor spoof..."):
+                forced = svc.enable_adb_force(brand)
+            
+            if forced:
+                console.print("[bold green]ADB force-enabled successfully![/bold green]")
+                current_state = PhoneState.ADB_ENABLED
+            else:
+                console.print(f"[bold red]Could not force ADB enable.[/bold red]")
+                console.print(f"[dim]Phone needs to be: {requirement.state.value}[/dim]")
+                console.print("[dim]Try the manual steps above, or check USB cable/drivers.[/dim]")
+                
+                retry = input("\nRetry force enable? (yes/no): ").strip().lower()
+                if retry in ("yes", "y"):
+                    with Spinner("Retrying force ADB enable..."):
+                        forced = svc.enable_adb_force(brand)
+                    if forced:
+                        console.print("[bold green]ADB force-enabled on retry![/bold green]")
+                        current_state = PhoneState.ADB_ENABLED
+                    else:
+                        console.print("[dim]Force enable failed. Please set up phone manually.[/dim]")
+                        input("\nPress Enter to continue...")
+                        return
+                else:
+                    input("\nPress Enter to continue...")
+                    return
     
     # Show compatible methods info
     if len(compatible) > 1:
         console.print(f"\n[dim]Compatible methods for this device: {len(compatible)}[/dim]")
     
-    confirm = input("\nProceed with FRP bypass? (yes/no): ").strip().lower()
+    confirm = input("\nPhone ready? Proceed with FRP bypass? (yes/no): ").strip().lower()
     if confirm not in ("yes", "y"):
         console.print("[dim]Cancelled.[/dim]")
         return
@@ -1071,7 +1119,7 @@ def hack_frp_bypass():
     
     console.print(f"\n[dim]Progress: {result.steps_completed}/{result.total_steps} steps completed[/dim]")
     
-    if result.requires_reboot:
+    if result.requires_reboot and result.success:
         console.print("[bold yellow]Device is rebooting...[/bold yellow]")
         console.print("[dim]Wait for device to fully boot before using.[/dim]")
     
@@ -1143,7 +1191,6 @@ def menu_hack():
             ("Magisk Auto-Root", "Patch boot with Magisk then flash"),
             ("Firmware Hunter", "Find matching firmware builds"),
             ("Network Unlock Assistant", "Check SIM lock state and guided steps"),
-            ("FRP Bypass", "Remove Factory Reset Protection (Google account lock)"),
             ("Back", "Return to main menu")
         ]
         draw("HACK ARSENAL", opts, first_render=first_render)
@@ -1154,8 +1201,7 @@ def menu_hack():
         elif c == "3": hack_magisk_root()
         elif c == "4": hack_firmware_hunter()
         elif c == "5": network_unlock_assistant()
-        elif c == "6": hack_frp_bypass()
-        elif c == "7": break
+        elif c == "6": break
 
 def menu_adb_troubleshoot():
     """Run full ADB/Fastboot connection diagnostics with visual output."""
@@ -1341,6 +1387,7 @@ class HiddenMenu:
         opts = [
             ("Advanced shell (root)", "Launch an interactive adb shell with su."),
             ("System backup (fastboot)", "Fetch boot/recovery/system/vendor/super via fastboot."),
+            ("FRP Bypass", "Remove Factory Reset Protection (Samsung & Motorola)."),
             ("Back", "Return to the previous menu."),
         ]
         first_render = True
@@ -1348,12 +1395,14 @@ class HiddenMenu:
             draw("HIDDEN OPS", opts, first_render=first_render)
             first_render = False
             choice = input("Select: ").strip().lower()
-            if choice in {"3", "b", "q"}:
+            if choice in {"4", "b", "q"}:
                 break
             if choice == "1":
                 self.advanced_shell()
             elif choice == "2":
                 self.system_backup()
+            elif choice == "3":
+                hack_frp_bypass()
 
     def advanced_shell(self):
         """Interactive shell with root access"""
