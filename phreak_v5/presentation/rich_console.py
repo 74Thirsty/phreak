@@ -1095,17 +1095,66 @@ def hack_frp_bypass():
     if len(compatible) > 1:
         console.print(f"\n[dim]Compatible methods for this device: {len(compatible)}[/dim]")
     
+    # Get the actual steps for this method to check if it's manual-only
+    # Use recommended method if auto-detect was selected
+    actual_method = selected_method if selected_method is not None else recommended
+    
+    step_methods = {
+        FRPMethod.SAMSUNG_TEST_MODE: svc.samsung_test_mode_steps,
+        FRPMethod.SAMSUNG_MTP_HALABTECH: svc.samsung_mtp_halabtech_steps,
+        FRPMethod.SAMSUNG_ADB_REMOVE: svc.samsung_adb_remove_steps,
+        FRPMethod.SAMSUNG_DOWNLOAD_MODE: svc.samsung_download_mode_steps,
+        FRPMethod.SAMSUNG_COMBINATION_FW: svc.samsung_combination_fw_steps,
+        FRPMethod.SAMSUNG_BROWSER: svc.samsung_browser_steps,
+        FRPMethod.MOTO_HELLO_UI: svc.motorola_hello_ui_steps,
+        FRPMethod.MOTO_TALKBACK: svc.motorola_talkback_steps,
+        FRPMethod.MOTO_EMERGENCY_DIALER: svc.motorola_emergency_dialer_steps,
+        FRPMethod.MOTO_FASTBOOT_ERASE: svc.motorola_fastboot_steps,
+        FRPMethod.MOTO_SETUP_WIZARD: svc.motorola_setup_wizard_steps,
+        FRPMethod.MOTO_MOTOREAPER: svc.motorola_motoreaper_steps,
+        FRPMethod.ADB_ACCOUNT_REMOVE: svc.adb_account_remove_steps,
+        FRPMethod.FASTBOOT_ERASE: svc.fastboot_erase_steps,
+        FRPMethod.SIDELOAD_BYPASS: svc.sideload_bypass_steps,
+    }
+    get_steps = step_methods.get(actual_method, svc.adb_account_remove_steps)
+    steps = get_steps()
+    
+    # Check if this is a manual-only method (all steps start with #)
+    has_real_commands = any(not cmd.startswith("#") for _, cmd in steps)
+    
+    # Show the step-by-step instructions
+    console.print(f"\n[bold cyan]═══ {method_name} - Step-by-Step Instructions ═══[/bold cyan]\n")
+    
+    step_num = 0
+    for desc, cmd in steps:
+        if cmd.startswith("# MANUAL:"):
+            step_num += 1
+            instruction = cmd.replace("# MANUAL:", "").strip()
+            console.print(f"  [bold green]{step_num}.[/bold green] [bold]{desc}[/bold]")
+            console.print(f"     [dim]{instruction}[/dim]\n")
+        elif cmd.startswith("# WAIT:"):
+            wait_text = cmd.replace("# WAIT:", "").strip()
+            console.print(f"  [dim]   ↳ Wait: {wait_text}[/dim]\n")
+    
+    if not has_real_commands:
+        console.print("[bold yellow]═══ END OF INSTRUCTIONS ═══[/bold yellow]")
+        console.print("[dim]Follow these steps on your phone. No PC commands will be executed.[/dim]")
+        console.print("[dim]After completing all steps, your phone should be unlocked.[/dim]\n")
+        
+        input("Press Enter after completing the steps...")
+        return
+    
+    # For methods with real commands, confirm and execute
     confirm = input("\nPhone ready? Proceed with FRP bypass? (yes/no): ").strip().lower()
     if confirm not in ("yes", "y"):
         console.print("[dim]Cancelled.[/dim]")
         return
     
-    # Execute
     console.print(f"\n[bold cyan]Executing {method_name}...[/bold cyan]")
     console.print("[dim]Follow any on-screen instructions carefully.[/dim]\n")
     
     with Spinner("Running FRP bypass steps..."):
-        result = svc.execute_bypass(selected_method)
+        result = svc.execute_bypass(actual_method)
     
     # Show result
     if result.success:

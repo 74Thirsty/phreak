@@ -28,6 +28,7 @@ from typing import Tuple, Optional, List
 import subprocess
 import shlex
 import time
+import os
 
 __all__ = [
     "FRPMethod",
@@ -1218,6 +1219,8 @@ class FRPBypassService:
         5. Download and install FRP bypass APK
 
         Note: Patched in Android 14+ security updates.
+        
+        All steps are manual - works from Welcome screen with no ADB/fastboot.
         """
         return (
             # Step 1: Enable TalkBack
@@ -1268,7 +1271,7 @@ class FRPBypassService:
             ("Add new Google account",
              "# MANUAL: Sign in with a known Google account"),
             ("Reboot device",
-             self._adb("reboot")),
+             "# MANUAL: Hold power button and select Reboot"),
         )
 
     def motorola_emergency_dialer_steps(self) -> Tuple[Tuple[str, str], ...]:
@@ -1280,11 +1283,13 @@ class FRPBypassService:
 
         Works on: Android 10-12, some Android 13 devices
         Patched on: Newer Moto G 2024+ models
+        
+        All steps are manual - works from Welcome screen with no ADB/fastboot.
         """
         return (
-            # Step 1: Connect to WiFi
+            # Step 1: Connect to WiFi manually
             ("Connect to WiFi",
-             self._adb("shell am start -a android.settings.WIFI_SETTINGS")),
+             "# MANUAL: From welcome screen, connect to a WiFi network"),
             
             # Step 2: Open emergency dialer
             ("Tap Emergency Call",
@@ -1310,44 +1315,55 @@ class FRPBypassService:
             ("Sign in with known account",
              "# MANUAL: Enter credentials for a Google account you know"),
             
-            # Step 6: Reboot
+            # Step 6: Reboot manually
             ("Reboot device",
-             self._adb("reboot")),
+             "# MANUAL: Hold power button and select Reboot"),
         )
 
     def motorola_fastboot_steps(self) -> Tuple[Tuple[str, str], ...]:
-        """Motorola Fastboot FRP erase method.
+        """Motorola FRP erase - MTK Brom mode via mtkclient.
 
-        Works on both MediaTek and Qualcomm Motorola devices:
-        - MediaTek: Use MTK Client for Brom mode (free)
-        - Qualcomm: Use fastboot commands or EDL mode (may need tools)
+        For MediaTek devices with locked bootloader (like Moto G 3rd Gen MT6835):
+        1. Power off phone completely
+        2. Hold Volume Up + Volume Down buttons
+        3. Plug in USB cable (keep holding buttons)
+        4. mtkclient detects phone in Brom mode and erases FRP
+        5. Phone reboots automatically
+
+        This works on locked bootloaders - no unlock needed.
+        Requires: ~/Apps/mtkclient with venv set up.
         """
+        # Find actual home directory (not /root when running as root)
+        home = os.environ.get("HOME") or os.path.expanduser("~")
+        # If HOME is /root but /home/uber exists, use that
+        if home == "/root" and os.path.isdir("/home/uber"):
+            home = "/home/uber"
+        mtkclient = os.path.join(home, "Apps", "mtkclient")
+        mtk_bin = os.path.join(mtkclient, ".venv", "bin", "python")
+        mtk_script = os.path.join(mtkclient, "mtk.py")
+        
         return (
-            # Step 1: Enter Fastboot mode
-            ("Enter Fastboot mode",
-             "# MANUAL: Power off, hold Volume Down + Power"),
-            ("Connect to PC via USB",
-             "# MANUAL: Connect USB cable while in Fastboot"),
+            # Step 1: Power off phone
+            ("Power off phone completely",
+             "# MANUAL: Hold power button, select Power Off"),
+            ("Wait for phone to fully shut down",
+             "# WAIT: Wait 5 seconds after screen goes black"),
             
-            # Step 2: Verify fastboot connection
-            ("Verify fastboot connection",
-             self._fastboot("devices")),
+            # Step 2: Enter Brom mode
+            ("Hold Volume Up + Volume Down",
+             "# MANUAL: Press and HOLD both volume buttons"),
+            ("Plug in USB cable while holding buttons",
+             "# MANUAL: Connect USB cable to phone while holding Vol Up+Down"),
+            ("Keep holding until PC detects phone",
+             "# WAIT: You'll hear USB connect sound on PC"),
             
-            # Step 3: Erase FRP partition
-            ("Erase FRP partition",
-             self._fastboot("erase frp")),
+            # Step 3: Erase FRP via mtkclient
+            ("Erase FRP partition via Brom mode",
+             f"{mtk_bin} {mtk_script} e frp"),
             
-            # Step 4: Erase persist (alternative)
-            ("Erase persist partition",
-             self._fastboot("erase persist")),
-            
-            # Step 5: Erase userdata
-            ("Erase userdata partition",
-             self._fastboot("erase userdata")),
-            
-            # Step 6: Reboot
-            ("Reboot device",
-             self._fastboot("reboot")),
+            # Step 4: Phone reboots automatically
+            ("Wait for phone to reboot",
+             "# WAIT: Phone will reboot automatically after erase"),
         )
 
     def motorola_setup_wizard_steps(self) -> Tuple[Tuple[str, str], ...]:
@@ -1510,22 +1526,9 @@ class FRPBypassService:
             if info["has_adb"]:
                 return FRPMethod.ADB_ACCOUNT_REMOVE
             
-            ui = info.get("motorola_ui")
-            android_version = info.get("android_version", "")
-            
-            # Check Android version for method selection
-            try:
-                major = int(android_version.split(".")[0]) if android_version else 0
-            except ValueError:
-                major = 0
-            
-            if ui == "hello_ui":
-                return FRPMethod.MOTO_HELLO_UI
-            elif ui == "myux":
-                return FRPMethod.MOTO_TALKBACK
-            
-            # Default for unknown UI
-            return FRPMethod.MOTO_EMERGENCY_DIALER
+            # No ADB - prefer Fastboot Erase (actually executes commands)
+            # Manual methods are just instructions, not real exploits
+            return FRPMethod.MOTO_FASTBOOT_ERASE
 
         # Generic Android with ADB
         if info["has_adb"]:
