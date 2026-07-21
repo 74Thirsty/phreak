@@ -82,6 +82,7 @@ import threading, time, sys
 
 from services.diag_collector import collect_diagnostics
 from phreak_v5.services.motorola_enterprise import EnrollmentPayload, MotorolaEnterpriseManager
+from phreak_v5.services.adb_troubleshoot import run_diagnostics, generate_fix_guide
 
 console = Console()
 
@@ -725,11 +726,14 @@ def preflight():
         ),
         "avbtool": (
             "avbtool",
-            "python3 -m pip install --user avbtool"
+            f"{sys.executable} -m pip install --user avbtool 2>/dev/null || "
+            f"sudo apt-get install -y avbtool 2>/dev/null || "
+            f"{sys.executable} -m pip install --user --break-system-packages avbtool"
         ),
         "mtk": (
             "mtk",
-            "git clone https://github.com/bkerler/mtkclient.git ~/Apps/mtkclient && "
+            "if [ -d ~/Apps/mtkclient ]; then cd ~/Apps/mtkclient && git pull; "
+            "else git clone https://github.com/bkerler/mtkclient.git ~/Apps/mtkclient; fi && "
             "cd ~/Apps/mtkclient && python3 -m pip install --user -r requirements.txt"
         ),
     }
@@ -845,6 +849,247 @@ def hack_brom_bypass(): mtk_probe()
 def hack_magisk_root(): auto_root_magisk()
 def hack_firmware_hunter(): firmware_hunter()
 
+def hack_frp_bypass():
+    """FRP bypass wizard - removes Factory Reset Protection on Samsung and Motorola.
+    
+    2026 Updated: Includes patch-level detection and compatibility notes.
+    """
+    from phreak_v5.services.frp_bypass import FRPBypassService, FRPMethod
+    
+    console.print(Panel("[bold cyan]FRP Bypass Wizard (2026 Updated)[/bold cyan]",
+                        subtitle="Factory Reset Protection Removal - Samsung & Motorola",
+                        border_style="bright_magenta"))
+    
+    console.print("\n[bold]This tool removes Google account lock (FRP) after factory reset.[/bold]")
+    console.print("[dim]Intended for authorized device recovery operations only.[/dim]\n")
+    
+    svc = FRPBypassService()
+    
+    # Detect device state
+    with Spinner("Detecting device state..."):
+        info = svc.get_device_info()
+        brand = info["brand"]
+        android = info["android_version"]
+        has_adb = info["has_adb"]
+        in_fastboot = info["in_fastboot"]
+        is_samsung = info["is_samsung"]
+        is_motorola = info["is_motorola"]
+        moto_ui = info.get("motorola_ui")
+        recommended = svc.get_recommended_method()
+        compatible = svc.get_compatible_methods()
+        notes = svc.get_compatibility_notes()
+    
+    # Show device info
+    info_table = Table(box=box.ROUNDED, title="Device Status (2026)", border_style="cyan")
+    info_table.add_column("Property", style="bold")
+    info_table.add_column("Value")
+    
+    info_table.add_row("Brand", brand or "Unknown")
+    info_table.add_row("Model", info.get("model") or "Unknown")
+    info_table.add_row("Android", android or "Unknown")
+    info_table.add_row("Security Patch", info.get("security_patch") or "Unknown")
+    
+    # Show patch compatibility status
+    if info.get("is_jan_2026_or_later"):
+        info_table.add_row("Patch Status", "[bold red]Jan 2026+ (Most exploits blocked)[/bold red]")
+    elif info.get("is_dec_2025_or_earlier"):
+        info_table.add_row("Patch Status", "[bold green]Dec 2025 or earlier (Exploits available)[/bold green]")
+    else:
+        info_table.add_row("Patch Status", "[yellow]Unknown[/yellow]")
+    
+    if is_samsung:
+        info_table.add_row("Device Type", "[bold yellow]SAMSUNG[/bold yellow]")
+    elif is_motorola:
+        ui_label = "Hello UI (Android 14+)" if moto_ui == "hello_ui" else "MyUX (Android 13-)"
+        info_table.add_row("Device Type", f"[bold yellow]MOTOROLA[/bold yellow] ({ui_label})")
+    else:
+        info_table.add_row("Device Type", "Other Android")
+    
+    info_table.add_row("ADB Access", "[green]Yes[/green]" if has_adb else "[red]No[/red]")
+    info_table.add_row("Fastboot Mode", "[green]Yes[/green]" if in_fastboot else "[red]No[/red]")
+    info_table.add_row("Recommended", f"[bold yellow]{recommended.value}[/bold yellow]")
+    
+    console.print(info_table)
+    
+    # Show compatibility notes
+    if notes:
+        console.print("\n[bold yellow]Compatibility Notes:[/bold yellow]")
+        for note in notes:
+            console.print(f"  [dim]• {note}[/dim]")
+    
+    # Build method list based on device type
+    console.print("\n[bold]Select FRP bypass method:[/bold]")
+    
+    if is_samsung:
+        # Check patch level for method availability
+        if info.get("is_jan_2026_or_later"):
+            # Jan 2026+ patch - limited methods
+            methods = [
+                ("Samsung Combination FW", "Engineering firmware flash (handles both FRP layers)"),
+                ("Samsung Download Mode", "Odin flash method (older devices)"),
+                ("Samsung ADB Remove", "Direct ADB account removal (requires ADB)"),
+                ("Generic Fastboot Erase", "Erase FRP partition via fastboot"),
+                (f"Auto-detect ({recommended.value})", "Use recommended method"),
+            ]
+            method_map = [
+                FRPMethod.SAMSUNG_COMBINATION_FW,
+                FRPMethod.SAMSUNG_DOWNLOAD_MODE,
+                FRPMethod.SAMSUNG_ADB_REMOVE,
+                FRPMethod.FASTBOOT_ERASE,
+                None,
+            ]
+        else:
+            # Dec 2025 or earlier - full method list
+            methods = [
+                ("Samsung Test Mode (*#0*#)", "One-click bypass via test mode (most effective)"),
+                ("Samsung MTP (HalabTech)", "MTP mode exploit for Android 15/16"),
+                ("Samsung ADB Remove", "Direct ADB account removal (requires ADB)"),
+                ("Samsung Combination FW", "Engineering firmware flash (professional method)"),
+                ("Samsung Browser", "Download and install FRP bypass APK"),
+                ("Samsung Download Mode", "Odin flash method (Android 5/6)"),
+                ("Generic ADB Remove", "Standard ADB account removal"),
+                (f"Auto-detect ({recommended.value})", "Use recommended method"),
+            ]
+            method_map = [
+                FRPMethod.SAMSUNG_TEST_MODE,
+                FRPMethod.SAMSUNG_MTP_HALABTECH,
+                FRPMethod.SAMSUNG_ADB_REMOVE,
+                FRPMethod.SAMSUNG_COMBINATION_FW,
+                FRPMethod.SAMSUNG_BROWSER,
+                FRPMethod.SAMSUNG_DOWNLOAD_MODE,
+                FRPMethod.ADB_ACCOUNT_REMOVE,
+                None,
+            ]
+    elif is_motorola:
+        if moto_ui == "hello_ui":
+            methods = [
+                ("Motorola Hello UI Widget", "Moto Widget exploit (Android 14+)"),
+                ("Motorola Emergency Dialer", "Secret code *#*#4636#*#* method"),
+                ("Motorola Fastboot Erase", "Erase FRP partition via fastboot"),
+                ("Motorola MotoReaper", "PC tool for newer devices (Android 13+)"),
+                ("Motorola Setup Wizard", "Setup wizard bypass flow"),
+                ("Generic ADB Remove", "Standard ADB account removal"),
+                (f"Auto-detect ({recommended.value})", "Use recommended method"),
+            ]
+            method_map = [
+                FRPMethod.MOTO_HELLO_UI,
+                FRPMethod.MOTO_EMERGENCY_DIALER,
+                FRPMethod.MOTO_FASTBOOT_ERASE,
+                FRPMethod.MOTO_MOTOREAPER,
+                FRPMethod.MOTO_SETUP_WIZARD,
+                FRPMethod.ADB_ACCOUNT_REMOVE,
+                None,
+            ]
+        else:  # myux or unknown
+            methods = [
+                ("Motorola TalkBack", "Accessibility exploit (Android 13-)"),
+                ("Motorola Emergency Dialer", "Secret code *#*#4636#*#* method"),
+                ("Motorola Hello UI Widget", "Moto Widget exploit (Android 14+)"),
+                ("Motorola Fastboot Erase", "Erase FRP partition via fastboot"),
+                ("Motorola MotoReaper", "PC tool for newer devices"),
+                ("Motorola Setup Wizard", "Setup wizard bypass flow"),
+                (f"Auto-detect ({recommended.value})", "Use recommended method"),
+            ]
+            method_map = [
+                FRPMethod.MOTO_TALKBACK,
+                FRPMethod.MOTO_EMERGENCY_DIALER,
+                FRPMethod.MOTO_HELLO_UI,
+                FRPMethod.MOTO_FASTBOOT_ERASE,
+                FRPMethod.MOTO_MOTOREAPER,
+                FRPMethod.MOTO_SETUP_WIZARD,
+                None,
+            ]
+    else:
+        methods = [
+            ("ADB Account Remove", "Remove Google account via ADB"),
+            ("Fastboot FRP Erase", "Erase FRP partition via fastboot"),
+            ("ADB Sideload", "Recovery mode sideload bypass package"),
+            (f"Auto-detect ({recommended.value})", "Use recommended method"),
+        ]
+        method_map = [
+            FRPMethod.ADB_ACCOUNT_REMOVE,
+            FRPMethod.FASTBOOT_ERASE,
+            FRPMethod.SIDELOAD_BYPASS,
+            None,
+        ]
+    
+    for i, (name, desc) in enumerate(methods, 1):
+        console.print(f"  [cyan]{i}[/cyan]. {name} - [dim]{desc}[/dim]")
+    
+    default_choice = len(methods)  # Auto-detect is last
+    choice = input(f"\nSelect method (1-{len(methods)}, default={default_choice}): ").strip() or str(default_choice)
+    
+    try:
+        idx = int(choice) - 1
+        if idx < 0 or idx >= len(methods):
+            raise ValueError
+    except ValueError:
+        console.print("[red]Invalid selection.[/red]")
+        input("Press Enter...")
+        return
+    
+    selected_method = method_map[idx]
+    method_name = methods[idx][0]
+    
+    console.print(f"\n[bold yellow]Selected: {method_name}[/bold yellow]")
+    
+    # Show patch-specific warnings
+    if is_samsung and info.get("is_jan_2026_or_later"):
+        if selected_method in (FRPMethod.SAMSUNG_TEST_MODE, FRPMethod.SAMSUNG_MTP_HALABTECH):
+            console.print("[bold red]WARNING: Device has Jan 2026+ patch.[/bold red]")
+            console.print("[dim]This method may fail. Consider Combination Firmware flash instead.[/dim]")
+    
+    if not in_fastboot and not has_adb:
+        console.print("[bold yellow]NOTE: No ADB or fastboot access detected.[/bold yellow]")
+        console.print("[dim]Some methods require manual steps on the device (dialer codes, TalkBack, etc).[/dim]")
+    
+    # Show compatible methods info
+    if len(compatible) > 1:
+        console.print(f"\n[dim]Compatible methods for this device: {len(compatible)}[/dim]")
+    
+    confirm = input("\nProceed with FRP bypass? (yes/no): ").strip().lower()
+    if confirm not in ("yes", "y"):
+        console.print("[dim]Cancelled.[/dim]")
+        return
+    
+    # Execute
+    console.print(f"\n[bold cyan]Executing {method_name}...[/bold cyan]")
+    console.print("[dim]Follow any on-screen instructions carefully.[/dim]\n")
+    
+    with Spinner("Running FRP bypass steps..."):
+        result = svc.execute_bypass(selected_method)
+    
+    # Show result
+    if result.success:
+        console.print(Panel(f"[bold green]{result.message}[/bold green]",
+                           title="SUCCESS",
+                           border_style="green"))
+    else:
+        console.print(Panel(f"[bold red]{result.message}[/bold red]",
+                           title="FAILED",
+                           border_style="red"))
+    
+    console.print(f"\n[dim]Progress: {result.steps_completed}/{result.total_steps} steps completed[/dim]")
+    
+    if result.requires_reboot:
+        console.print("[bold yellow]Device is rebooting...[/bold yellow]")
+        console.print("[dim]Wait for device to fully boot before using.[/dim]")
+    
+    # Suggest alternative methods if failed
+    if not result.success and len(compatible) > 1:
+        console.print("\n[bold]Alternative methods available:[/bold]")
+        for i, m in enumerate(compatible[:3], 1):
+            if m != selected_method:
+                console.print(f"  [cyan]{i}[/cyan]. {m.value}")
+    
+    # Show Samsung Account reminder
+    if is_samsung and result.success:
+        console.print("\n[bold yellow]REMINDER:[/bold yellow]")
+        console.print("[dim]Samsung devices have an additional Samsung Account layer.[/dim]")
+        console.print("[dim]You may need to enter Samsung Account credentials during setup.[/dim]")
+    
+    input("\nPress Enter to continue...")
+
 
 # ---------- Menus ----------
 def help_block(topic):
@@ -874,7 +1119,8 @@ If SP Flash Tool asks for .auth, use BROM bypass instead.""",
 - Patch+Flash VBMETA: disables dm-verity/verification.
 - BROM Bypass: talks to BootROM to skip .auth.
 - Magisk Auto-Root: push stock boot.img -> patch in Magisk -> pull/flash.
-- Firmware Hunter: builds search links for the exact fingerprint/codename."""
+- Firmware Hunter: builds search links for the exact fingerprint/codename.
+- FRP Bypass: removes Google account lock (Samsung Test Mode, Motorola TalkBack/Widget, Fastboot erase)."""
         ,
         "KB": """Knowledge base documents render in the console. Use arrow keys or PgUp/PgDn in your terminal to scroll, then press Enter to return.""",
         "MOTO_ENT": """Motorola Enterprise enrollment is required for locked-screen diagnostics on fully managed devices:
@@ -897,6 +1143,7 @@ def menu_hack():
             ("Magisk Auto-Root", "Patch boot with Magisk then flash"),
             ("Firmware Hunter", "Find matching firmware builds"),
             ("Network Unlock Assistant", "Check SIM lock state and guided steps"),
+            ("FRP Bypass", "Remove Factory Reset Protection (Google account lock)"),
             ("Back", "Return to main menu")
         ]
         draw("HACK ARSENAL", opts, first_render=first_render)
@@ -907,7 +1154,61 @@ def menu_hack():
         elif c == "3": hack_magisk_root()
         elif c == "4": hack_firmware_hunter()
         elif c == "5": network_unlock_assistant()
-        elif c == "6": break
+        elif c == "6": hack_frp_bypass()
+        elif c == "7": break
+
+def menu_adb_troubleshoot():
+    """Run full ADB/Fastboot connection diagnostics with visual output."""
+    console.print(Panel("[bold cyan]Running ADB/Fastboot connection diagnostics…[/bold cyan]",
+                        border_style="bright_magenta"))
+
+    with Spinner("Scanning USB, ADB server, udev, kernel…"):
+        result = run_diagnostics()
+
+    checks = result["checks"]
+    issues = result["issues"]
+
+    # ── Render each check ──
+    status_icon = {"pass": "[bold green]✓[/bold green]",
+                   "fail": "[bold red]✗[/bold red]",
+                   "warn": "[bold yellow]⚠[/bold yellow]",
+                   "info": "[bold cyan]→[/bold cyan]"}
+
+    tbl = Table(box=box.ROUNDED, title="Diagnostic Report", border_style="bright_magenta",
+                title_style="bold bright_magenta", padding=(0, 1))
+    tbl.add_column("Status", justify="center", width=4)
+    tbl.add_column("Check", style="bold white", min_width=16)
+    tbl.add_column("Result", min_width=30)
+
+    for c in checks:
+        icon = status_icon.get(c.status, "?")
+        result_style = {"pass": "green", "fail": "red", "warn": "yellow", "info": "cyan"}.get(c.status, "white")
+        result_text = f"[{result_style}]{c.message}[/{result_style}]"
+        if c.details:
+            result_text += "\n" + "\n".join(f"[dim]  {d}[/dim]" for d in c.details[:5])
+        tbl.add_row(icon, c.name, result_text)
+
+    console.print(tbl)
+
+    # ── Summary panel ──
+    if issues == 0:
+        console.print(Panel("[bold green]Everything looks good — device should be working.[/bold green]",
+                            border_style="green", title="✓ PASS"))
+    else:
+        console.print(Panel(f"[bold red]Found {issues} issue(s).[/bold red]\n\n"
+                            "[bold]Fix them in order:[/bold]",
+                            border_style="red", title="✗ ISSUES DETECTED"))
+
+        fixes = generate_fix_guide(result)
+        fix_text = "\n".join(fixes)
+        console.print(Panel(Markdown(f"```\n{fix_text}\n```"),
+                            title="Remediation Steps", border_style="yellow"))
+
+    console.print(Panel.fit(
+        "[dim]Tip: sudo /tmp/adb-troubleshoot.sh for full kernel/udev access[/dim]",
+        border_style="dim"))
+    input("\nPress Enter to continue…")
+
 
 def menu_adb():
     first_render = True
@@ -1094,6 +1395,7 @@ def main():
             ("Hack Arsenal (Guided)", "Wizards: fix dm-verity, unbrick MTK, root, firmware."),
             ("Motorola Enterprise", "Enroll devices for locked-screen diagnostic access via EMM/OEMConfig."),
             ("Preflight Check", "Check tools/drivers/devices before you start."),
+            ("Connection Troubleshooter", "Full ADB/Fastboot diagnostic: USB, drivers, udev, permissions."),
             ("Knowledge base library", "Cheat sheets, templates, SDK samples."),
             ("Quit", "Exit the console.")
         ]
@@ -1102,7 +1404,7 @@ def main():
         first_render = False
         c = input("Select: ").strip().lower()
         if   c == "h": help_block("MAIN")
-        elif c == "q" or c == "8": sys.exit(0)
+        elif c == "q" or c == "9": sys.exit(0)
         elif c == "b": continue
         elif c == "1": menu_adb()
         elif c == "2": menu_fastboot()
@@ -1110,7 +1412,8 @@ def main():
         elif c == "4": menu_hack()
         elif c == "5": menu_motorola_enterprise()
         elif c == "6": preflight()
-        elif c == "7": knowledge_base_menu()
+        elif c == "7": menu_adb_troubleshoot()
+        elif c == "8": knowledge_base_menu()
         elif c == "hidden": hidden_menu.open_menu()
 
 

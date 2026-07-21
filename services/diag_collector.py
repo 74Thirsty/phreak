@@ -40,7 +40,8 @@ def _run(cmd: Iterable[str], timeout: int = 120) -> subprocess.CompletedProcess:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=timeout,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
     except FileNotFoundError:

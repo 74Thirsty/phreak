@@ -312,6 +312,68 @@ class DeviceModificationOrchestrator:
             steps=steps,
         )
 
+    def frp_bypass_adb(self) -> Playbook:
+        """Playbook for FRP bypass via ADB account removal."""
+
+        steps = (
+            CommandStep(
+                "Remove Google account via settings",
+                self._adb("shell am start -a android.settings.ADD_ACCOUNT_SETTINGS"),
+            ),
+            CommandStep(
+                "Clear account manager data (requires root)",
+                self._adb("shell su -c 'pm clear com.google.android.gsf.login'"),
+                requires_root=True,
+            ),
+            CommandStep(
+                "Clear Google Play Services data",
+                self._adb("shell pm clear com.google.android.gms"),
+            ),
+            CommandStep(
+                "Remove FRP lock persistent flag",
+                self._adb("shell su -c 'settings put secure frp_lock_enabled 0'"),
+                requires_root=True,
+            ),
+        )
+        verification = (
+            self._adb("shell getprop ro.frp_unlocked"),
+        )
+        return Playbook(
+            name="FRP Bypass (ADB)",
+            summary="Remove Google account and FRP lock via ADB shell access.",
+            steps=steps,
+            verification=verification,
+        )
+
+    def frp_bypass_fastboot(self) -> Playbook:
+        """Playbook for FRP bypass via fastboot partition erase."""
+
+        steps = (
+            CommandStep(
+                "Erase FRP partition",
+                "fastboot erase frp",
+            ),
+            CommandStep(
+                "Alternative: erase persist partition",
+                "fastboot erase persist",
+            ),
+            CommandStep(
+                "Wipe user data (removes FRP trigger)",
+                "fastboot erase userdata",
+            ),
+            CommandStep(
+                "Reboot device",
+                "fastboot reboot",
+            ),
+        )
+        verification = ()
+        return Playbook(
+            name="FRP Bypass (Fastboot)",
+            summary="Erase FRP and user data partitions via fastboot.",
+            steps=steps,
+            verification=verification,
+        )
+
     def list_all_playbooks(self) -> Tuple[Playbook, ...]:
         """Convenience helper that returns every playbook in a tuple."""
 
@@ -321,6 +383,8 @@ class DeviceModificationOrchestrator:
             self.side_loading(),
             self.setup_crash_handler(),
             self.network_unlock(),
+            self.frp_bypass_adb(),
+            self.frp_bypass_fastboot(),
         )
 
     def iter_commands(self) -> Tuple[str, ...]:
