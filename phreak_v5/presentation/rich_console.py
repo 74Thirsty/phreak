@@ -160,14 +160,34 @@ def clear(): os.system("clear" if os.name == "posix" else "cls")
 
 
 def banner():
-    art = r"""   ____ _ _   ____      ____            ____              _
-  / ___(_) |_|  _ \  _ / ___| ___  _ __|  _ \  ___   ___| |__   ___ _ __
- | |  _| | __| | | |/ / \___ \ / _ \| '__| | | |/ _ \ / __| '_ \ / _ \ '__|
- | |_| | | |_| |_| / /__ ___) | (_) | |  | |_| | (_) | (__| | | |  __/ |
-  \____|_|\__|____/_____|____/ \___/|_|  |____/ \___/ \___|_| |_|\___|_|
-"""
-    console.print(f"[magenta]{art}[/magenta]")
-    console.print("[white]PHREAK v5 Android Control Center[/white]\n")
+    console.print()
+    console.rule("[bold magenta]═══════════════════════════════════════════════════════════[/bold magenta]")
+    console.print()
+
+    art = (
+        "[bold bright_cyan]"
+        "  ▄▄▄▄▄▄                                           ▄▄▄▄▄▄▄ \n"
+        " █▀██▀▀▀█▄ █▄                                      ██▀▀▀▀▀ \n"
+        "   ██▄▄▄█▀ ██    ▄                ▄▄               ██▄▄▄   \n"
+        "   ██▀▀▀   ████▄ ████▄▄█▀█▄ ▄▀▀█▄ ██ ▄█▀    ▀█▄ ██▀▀▀▀▀██▄ \n"
+        " ▄ ██      ██ ██ ██   ██▄█▀ ▄█▀██ ████       ██▄██ ▄   ▄██ \n"
+        " ▀██▀     ▄██ ██▄█▀  ▄▀█▄▄▄▄▀█▄██▄██ ▀█▄      ▀█▀  ▀████▀  \n"
+        "                                       ▄▄▄▄▄▄▄              "
+        "[/bold bright_cyan]"
+    )
+    console.print(art)
+
+    console.print()
+    console.rule("[bold magenta]═══════════════════════════════════════════════════════════[/bold magenta]")
+
+    subtitle = Text()
+    subtitle.append("\n  ⚡ ", style="bold yellow")
+    subtitle.append("ANDROID CONTROL CENTER", style="bold bright_cyan")
+    subtitle.append("  ⚡", style="bold yellow")
+    subtitle.append("  │  ", style="dim")
+    subtitle.append("v5", style="bold magenta")
+    console.print(subtitle, justify="center")
+    console.print()
 
 # change draw signature
 def draw(title, options, info=None, show_last=True, *, first_render=False):

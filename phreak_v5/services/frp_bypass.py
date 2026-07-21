@@ -1697,17 +1697,21 @@ class FRPBypassService:
         actual_commands_run = 0
         manual_steps_done = False
 
+        had_manual_steps = False
         for desc, cmd in steps:
             # Manual steps - don't count as complete, just skip
             if cmd.startswith("#"):
+                had_manual_steps = True
                 if cmd.startswith("# WAIT"):
                     time.sleep(2)
                 # Don't increment completed for manual steps
                 continue
             
-            # First real command - check prerequisites here
-            if not manual_steps_done:
+            # First real command after manual steps - pause and let user confirm
+            if had_manual_steps and not manual_steps_done:
                 manual_steps_done = True
+                print("\n>>> Manual steps complete? Press Enter to run the exploit command...")
+                input()
                 # Re-check device state after manual steps
                 self._device_cache = {}
                 current_info = self.get_device_info()
@@ -1718,7 +1722,7 @@ class FRPBypassService:
                 )
                 requires_fastboot = method in (
                     FRPMethod.FASTBOOT_ERASE,
-                    FRPMethod.MOTO_FASTBOOT_ERASE,
+                    # MOTO_FASTBOOT_ERASE uses mtkclient Brom mode, not fastboot
                 )
                 
                 if requires_adb and not current_info["has_adb"]:
