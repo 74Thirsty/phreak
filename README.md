@@ -1,4 +1,4 @@
-![Sheen Banner](https://raw.githubusercontent.com/74Thirsty/74Thirsty/main/assets/phreak.svg)
+![Sheen Banner](https://github.com/74Thirsty/74Thirsty/blob/main/assets/phrk.svg)
 
 # PHREAK v5
 
