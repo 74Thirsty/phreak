@@ -118,7 +118,3 @@ processFile(inputPathAbs: absoluteInputPathDylib, outputPathAbs: absoluteOutputP
 
 print("\n[Debug] Deobfuscation process finished.")
 print("Check for output files: \(outputPathPlist1), \(outputPathPlist2), \(outputPathZip) in \(currentDirectoryPath)")
-le(inputPathAbs: absoluteInputPathDylib, outputPathAbs: absoluteOutputPathZip)
-
-print("\n[Debug] Deobfuscation process finished.")
-print("Check for output files: \(outputPathPlist1), \(outputPathPlist2), \(outputPathZip) in \(currentDirectoryPath)")

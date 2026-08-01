@@ -33,8 +33,12 @@ class TelemetryBus:
     def emit(self, topic: str, payload: MutableMapping[str, Any]) -> None:
         event = TelemetryEvent(topic=topic, payload=payload)
         self._queue.put_nowait(event)
-        if not self._dispatcher_task:
-            self._dispatcher_task = asyncio.create_task(self._dispatch_loop())
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running() and not self._dispatcher_task:
+            self._dispatcher_task = loop.create_task(self._dispatch_loop())
 
     async def iter_events(self, topic: str) -> AsyncIterator[TelemetryEvent]:
         queue: "asyncio.Queue[TelemetryEvent]" = asyncio.Queue()

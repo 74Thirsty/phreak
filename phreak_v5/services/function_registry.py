@@ -206,7 +206,7 @@ class ForensicLedger:
         previous_hash = self._entries[-1].entry_hash if self._entries else "GENESIS"
         payload = (
             f"{index}|{timestamp.isoformat()}|{function_name}|{caller}|{input_hash}|"
-            f"{output_hash}|{semantic_intent_vector}|{status}|{previous_hash}|{metadata}"
+            f"{output_hash}|{semantic_intent_vector}|{status}|{previous_hash}|{dict(metadata or {})}"
         )
         entry_hash = hashlib.sha256(payload.encode("utf-8", "replace")).hexdigest()
         record = ForensicLedgerEntry(
