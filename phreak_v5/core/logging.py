@@ -78,8 +78,17 @@ class AuditLoggingKernel:
         return records
 
     def verify(self) -> bool:
+        if not self.storage_path.exists():
+            return True
+        lines = self.storage_path.read_text(encoding="utf-8").strip().splitlines()
+        if not lines:
+            return True
         prev_hash = "0" * 64
-        for record in self.tail(limit=10_000):
+        for line in lines:
+            if not line.strip():
+                continue
+            data = json.loads(line)
+            record = AuditRecord(**data)
             payload = {
                 "timestamp": record.timestamp,
                 "kind": record.kind,
