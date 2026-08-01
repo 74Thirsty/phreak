@@ -56,7 +56,7 @@ if [ $CPU_EXCEEDS -eq 1 ]; then
 	# Run a fix script
     LAST_RESTART_TIME=$(cat $LAST_RESTART_FILE)
     CURRENT_TIME=$(date +"%s")
-    if [ -z "LAST_RESTART_TIME" ]
+    if [ -z "$LAST_RESTART_TIME" ]
     then
         $FIX_SCRIPT &
         echo $CURRENT_TIME > $LAST_RESTART_FILE
