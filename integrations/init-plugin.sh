@@ -21,7 +21,7 @@ if [ -z "$RESULT" ]; then
     echo "server/pom.xml updated"
 
     cp plugins/pom.xml plugins/pom.xml.bak
-    sed "s|    </modules>|        <module>%~1</module>\n    </modules>|g" plugins/pom.xml > plugins/pom.xml.new
+    sed "s|    </modules>|        <module>$1</module>\n    </modules>|g" plugins/pom.xml > plugins/pom.xml.new
     mv plugins/pom.xml.new plugins/pom.xml
     echo "plugins/pom.xml updated"
 else
