@@ -17,13 +17,14 @@ def _find_mtk():
     mtk = shutil.which("mtk")
     if mtk:
         return mtk
-    for p in [
-        Path.home() / "Apps/mtkclient/mtk.py",
-        Path.home() / "mtkclient/mtk.py",
-        Path("/opt/mtkclient/mtk.py"),
+    for base in [
+        Path.home() / "Apps/mtkclient",
+        Path.home() / "mtkclient",
+        Path("/opt/mtkclient"),
     ]:
-        if p.exists():
-            return f"python3 {p}"
+        mtk_py = base / "mtk.py"
+        if mtk_py.exists():
+            return f"python3 {mtk_py}"
     return "mtk.py"
 
 MTK = _find_mtk()
@@ -792,34 +793,36 @@ def run(cmd, action="exec", shell=False, timeout=None, show_spinner=False, spinn
     global LAST
     sp = None
     try:
-        # Start spinner if enabled
         if show_spinner:
             sp = Spinner(spinner_text or f"{action}…")
             sp.start()
 
         if shell:
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                shell=True,
-                timeout=timeout,
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, shell=True,
             )
         else:
-            proc = subprocess.run(
-                shlex.split(cmd),
-                capture_output=True,
+            proc = subprocess.Popen(
+                shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True,
-                timeout=timeout,
             )
 
-        out, err, code = proc.stdout.strip(), proc.stderr.strip(), proc.returncode
-        log_event(action, cmd, out, err, code)
+        out_lines = []
+        for line in proc.stdout:
+            line = line.rstrip()
+            if line:
+                out_lines.append(line)
+                if not show_spinner:
+                    print(f"  {line}")
+        proc.wait(timeout=timeout)
+        code = proc.returncode
+        out = "\n".join(out_lines)
+        log_event(action, cmd, out, "", code)
 
-        FIRST = (out.splitlines()[0] if out else "") or (err.splitlines()[0] if err else "")
+        FIRST = out_lines[0] if out_lines else ""
         LAST = f"[{action}] exit={code} :: {FIRST}"
 
-        # Report result through spinner
         if sp:
             if code == 0:
                 sp.stop(final=f"{action} ok", success=True)
@@ -827,15 +830,12 @@ def run(cmd, action="exec", shell=False, timeout=None, show_spinner=False, spinn
                 sp.stop(final=f"{action} failed", success=False)
 
         if code != 0:
-            if out:
-                preview = "\n".join(out.splitlines()[:10])
+            preview = "\n".join(out_lines[:10])
+            if preview:
                 print(f"\n[{action}] output:\n{preview}\n")
-            if err:
-                preview_err = "\n".join(err.splitlines()[:10])
-                print(f"[{action}] error:\n{preview_err}\n")
             print(f"[{action}] exited with status {code}")
 
-        return out, err, code
+        return out, "", code
 
     except subprocess.TimeoutExpired:
         LAST = f"[{action}] timeout"
@@ -871,8 +871,130 @@ def run(cmd, action="exec", shell=False, timeout=None, show_spinner=False, spinn
 
 # ---------- MTK bypass ----------
 def mtk_probe():
-    print("Attempting BROM handshake (mtkclient)…")
-    run(f"{MTK} print","mtk_print",shell=True)
+    global LAST
+    print("── MTK BROM PROBE ──\n")
+    print("Steps:")
+    print("  1. Power OFF the phone completely (hold power 10 sec)")
+    print("  2. Hold Volume+ AND Volume- together")
+    print("  3. Plug USB cable into phone (keep holding buttons)")
+    print("  4. Watch below for detection")
+    print("  5. You can release buttons once you see '✓ DETECTED'\n")
+
+    try:
+        print("Listening for device… (timeout in 30s)\n")
+
+        proc = subprocess.Popen(
+            shlex.split(MTK) + ["dumpbrom"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+
+        detected = False
+        handshake_ok = False
+        got_data = False
+
+        import select, time
+        start = time.time()
+        timeout = 30
+
+        while time.time() - start < timeout:
+            ready, _, _ = select.select([proc.stdout], [], [], 1.0)
+            if not ready:
+                # No output for 1 second - check if process died
+                if proc.poll() is not None:
+                    break
+                elapsed = int(time.time() - start)
+                print(f"\r  ⏳ Listening… ({elapsed}s / {timeout}s)", end="", flush=True)
+                continue
+
+            line = proc.stdout.readline()
+            if not line:
+                break
+            line = line.rstrip()
+            if not line:
+                continue
+
+            got_data = True
+            low = line.lower()
+
+            # Skip useless noise
+            if any(x in low for x in ["hint:", "power off the phone", "for brom mode", "for preloader mode", "hold power for"]):
+                continue
+            if line.strip().startswith("..."):
+                continue
+
+            # Meaningful status lines
+            if "waiting for preloader" in low or "waiting for brom" in low:
+                print(f"\r  ⟳ Waiting for device connection…          ")
+                continue
+            if "handshake failed" in low:
+                print(f"\r  ✗ Handshake failed - device rejected connection")
+                print(f"    → Phone may not be in BROM mode")
+                print(f"    → Try: unplug, power off fully, hold Vol+Vol-, plug in again")
+                continue
+            if "brom" in low and ("found" in low or "ok" in low or "success" in low):
+                detected = True
+                handshake_ok = True
+                print(f"\r  ✓ {line.strip()}                             ")
+            elif "preloader" in low and ("found" in low or "connected" in low or "vcom" in low):
+                detected = True
+                print(f"\r  ✓ {line.strip()}                             ")
+            elif "port" in low and ("found" in low or "connected" in low):
+                detected = True
+                print(f"\r  ✓ {line.strip()}                             ")
+            elif "sent" in low or "payload" in low or "da" in low:
+                print(f"\r  → {line.strip()}                             ")
+            else:
+                print(f"\r  {line.strip()}")
+
+        # Kill if still running (mtkclient hangs after timeout)
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+        print()  # newline after progress
+        code = proc.returncode
+
+        print()
+        if code == 0 and handshake_ok:
+            LAST = "[mtk_print] BROM detected"
+            print("══════════════════════════════════════")
+            print("  ✓ DEVICE IN BROM MODE - READY")
+            print("══════════════════════════════════════")
+        elif detected:
+            LAST = "[mtk_print] device detected"
+            print("══════════════════════════════════════")
+            print("  ✓ DEVICE DETECTED (check status above)")
+            print("══════════════════════════════════════")
+        else:
+            LAST = f"[mtk_print] no device found (exit={code})"
+            print("══════════════════════════════════════")
+            print("  ✗ NO DEVICE FOUND")
+            print("")
+            print("  What to do:")
+            print("   1. Unplug USB from phone")
+            print("   2. Hold power button 10 seconds (force off)")
+            print("   3. Wait 3 seconds")
+            print("   4. Hold Vol+ AND Vol- together")
+            print("   5. While holding, plug USB cable in")
+            print("   6. Keep holding until you see 'DETECTED' above")
+            print("")
+            print("  Still not working?")
+            print("   • Try a different USB cable (data, not charge-only)")
+            print("   • Try a different USB port (direct, not hub)")
+            print("   • Check: ls /dev/ttyUSB* (should show a port)")
+            print("══════════════════════════════════════")
+
+    except FileNotFoundError:
+        LAST = "[mtk_print] mtkclient not found"
+        print("✗ mtkclient not found – check installation")
+    except KeyboardInterrupt:
+        if proc:
+            proc.kill()
+        LAST = "[mtk_print] cancelled"
+        print("\n✗ Cancelled")
+    input("\nPress Enter…")
 
 def mtk_write_single():
     part=input("Partition name: ").strip()
@@ -1584,7 +1706,7 @@ def menu_mtk():
     while True:
         opts = [
             ("Preflight (drivers/checks)", "Check adb/fastboot/avbtool/mtk and USB state."),
-            ("Probe BROM (mtkclient print)", "Confirm BootROM handshake (bypass .auth)."),
+            ("Probe BROM (mtkclient dumpbrom)", "Confirm BootROM handshake (bypass .auth)."),
             ("Write single partition (mtk wl)", "Bypass write boot/recovery/super/vbmeta."),
             ("Back", "Return to main menu."),
         ]
