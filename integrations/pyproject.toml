@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "phreak-integrations"
+version = "0.1.0"
+description = "Optional integration modules for the Phreak toolkit."
+authors = [
+  {name = "Phreak Maintainers"}
+]
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+]
+
+[project.optional-dependencies]
+mdm = ["requests>=2.0"]
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["integrations*"]
+
