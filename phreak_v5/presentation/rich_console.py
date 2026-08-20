@@ -12,7 +12,21 @@ keyboard = importlib.import_module("keyboard") if keyboard_spec else None
 
 ADB = "adb"
 FASTBOOT = "fastboot"
-MTK = "python3 " + str(Path.home() / "Apps/mtkclient/mtk")
+
+def _find_mtk():
+    mtk = shutil.which("mtk")
+    if mtk:
+        return mtk
+    for p in [
+        Path.home() / "Apps/mtkclient/mtk.py",
+        Path.home() / "mtkclient/mtk.py",
+        Path("/opt/mtkclient/mtk.py"),
+    ]:
+        if p.exists():
+            return f"python3 {p}"
+    return "mtk.py"
+
+MTK = _find_mtk()
 LOG_FILE = Path.home() / "phreak_console.log.jsonl"
 LAST = ""  # persists on-screen
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -1208,6 +1222,170 @@ def hack_frp_bypass():
     input("\nPress Enter to continue...")
 
 
+def hack_mdm_bypass():
+    """MDM bypass wizard - removes Device Owner / MDM restrictions."""
+    console.print(Panel("[bold cyan]MDM Bypass Wizard[/bold cyan]",
+                        subtitle="Remove Device Owner & MDM Restrictions",
+                        border_style="bright_magenta"))
+    
+    console.print("\n[bold]This removes MDM/Device Owner restrictions on managed devices.[/bold]")
+    console.print("[dim]Intended for authorized IT admin operations only.[/dim]\n")
+    
+    # Detect device
+    with Spinner("Detecting device..."):
+        brand = run("adb shell getprop ro.product.brand", "detect_brand", timeout=5)[0].strip()
+        model = run("adb shell getprop ro.product.model", "detect_model", timeout=5)[0].strip()
+        has_adb = run("adb devices", "detect_adb", timeout=5)[0].strip()
+    
+    is_samsung = "samsung" in brand.lower()
+    is_motorola = "motorola" in brand.lower() or "moto" in brand.lower()
+    
+    # Show device info
+    info_table = Table(box=box.ROUNDED, title="Device Status", border_style="cyan")
+    info_table.add_column("Property", style="bold")
+    info_table.add_column("Value")
+    info_table.add_row("Brand", brand or "Unknown")
+    info_table.add_row("Model", model or "Unknown")
+    info_table.add_row("ADB Access", "[green]Yes[/green]" if "device" in has_adb else "[red]No[/red]")
+    
+    if is_samsung:
+        info_table.add_row("Device Type", "[bold yellow]SAMSUNG[/bold yellow]")
+    elif is_motorola:
+        info_table.add_row("Device Type", "[bold yellow]MOTOROLA[/bold yellow]")
+    else:
+        info_table.add_row("Device Type", "Other Android")
+    
+    console.print(info_table)
+    
+    # Build method list based on brand
+    console.print("\n[bold]Select MDM bypass method:[/bold]")
+    
+    if is_samsung:
+        methods = [
+            ("Samsung Knox MDM Removal", "Remove Knox MDM via ADB (requires ADB)"),
+            ("Samsung Enterprise Firmware", "Flash stock firmware to remove MDM"),
+            ("Samsung Factory Reset", "Factory reset without re-enrolling MDM"),
+            ("ADB Device Owner Removal", "Remove device owner via ADB commands"),
+        ]
+        method_commands = [
+            # Samsung Knox
+            [("Remove Knox MDM", "adb shell pm uninstall com.sec.enterprise.knox.cloudmdm.samsungsdk"),
+             ("Clear Knox data", "adb shell pm clear com.sec.enterprise.knox.cloudmdm.samsungsdk"),
+             ("Remove Device Owner", "adb shell dpm remove-active-admin com.sec.enterprise.knox.cloudmdm.samsungsdk")],
+            # Samsung Enterprise FW
+            [("Download stock firmware", "# MANUAL: Download correct firmware for your model"),
+             ("Flash via Odin", "# MANUAL: Flash firmware using Odin to remove MDM")],
+            # Samsung Factory Reset
+            [("Factory reset via settings", "adb shell recovery --wipe_data"),
+             ("Skip setup wizard", "# MANUAL: During setup, skip network and MDM enrollment")],
+            # ADB Device Owner
+            [("List device owners", "adb shell dpm list-owners"),
+             ("Remove device owner", "adb shell dpm remove-active-admin <package>"),
+             ("Clear MDM app data", "adb shell pm clear <mdm_package>")],
+        ]
+    elif is_motorola:
+        methods = [
+            ("Motorola MDM Removal", "Remove Moto device owner via ADB"),
+            ("Motorola Enterprise Reset", "Reset enterprise partition"),
+            ("ADB Device Owner Removal", "Remove device owner via ADB commands"),
+            ("Factory Reset (No MDM)", "Factory reset and skip enrollment"),
+        ]
+        method_commands = [
+            # Motorola MDM
+            [("List device owners", "adb shell dpm list-owners"),
+             ("Remove device owner", "adb shell dpm remove-active-admin <package>"),
+             ("Clear MDM data", "adb shell pm clear com.motorola.enterprise.mdm")],
+            # Motorola Enterprise Reset
+            [("Erase enterprise partition", "fastboot erase enterprise"),
+             ("Reboot device", "fastboot reboot")],
+            # ADB Device Owner
+            [("List device owners", "adb shell dpm list-owners"),
+             ("Remove device owner", "adb shell dpm remove-active-admin <package>")],
+            # Factory Reset
+            [("Factory reset", "adb shell recovery --wipe_data"),
+             ("Skip setup wizard", "# MANUAL: During setup, skip network and MDM enrollment")],
+        ]
+    else:
+        methods = [
+            ("ADB Device Owner Removal", "Remove device owner via ADB commands"),
+            ("Factory Reset", "Factory reset to clear MDM"),
+        ]
+        method_commands = [
+            [("List device owners", "adb shell dpm list-owners"),
+             ("Remove device owner", "adb shell dpm remove-active-admin <package>")],
+            [("Factory reset", "adb shell recovery --wipe_data")],
+        ]
+    
+    for i, (name, desc) in enumerate(methods, 1):
+        console.print(f"  [cyan]{i}[/cyan]. {name} - [dim]{desc}[/dim]")
+    
+    choice = input(f"\nSelect method (1-{len(methods)}): ").strip()
+    
+    try:
+        idx = int(choice) - 1
+        if idx < 0 or idx >= len(methods):
+            raise ValueError
+    except ValueError:
+        console.print("[red]Invalid selection.[/red]")
+        input("Press Enter...")
+        return
+    
+    method_name = methods[idx][0]
+    commands = method_commands[idx]
+    
+    console.print(f"\n[bold yellow]Selected: {method_name}[/bold yellow]")
+    
+    # Check ADB access
+    if "device" not in has_adb:
+        console.print("\n[bold red]ADB access required but not available.[/bold red]")
+        console.print("[dim]Enable USB debugging and connect device.[/dim]")
+        input("Press Enter...")
+        return
+    
+    # Show steps
+    console.print("\n[bold cyan]STEPS:[/bold cyan]")
+    for i, (desc, cmd) in enumerate(commands, 1):
+        if cmd.startswith("#"):
+            console.print(f"  [cyan]{i}.[/cyan] {desc} - [dim]{cmd.replace('# MANUAL:', '')}[/dim]")
+        else:
+            console.print(f"  [cyan]{i}.[/cyan] {desc} - [dim]{cmd}[/dim]")
+    
+    confirm = input("\nProceed? (yes/no): ").strip().lower()
+    if confirm not in ("yes", "y"):
+        console.print("[dim]Cancelled.[/dim]")
+        return
+    
+    # Execute commands
+    console.print(f"\n[bold cyan]Executing {method_name}...[/bold cyan]\n")
+    
+    success_count = 0
+    for desc, cmd in commands:
+        if cmd.startswith("#"):
+            console.print(f"[dim]Manual step: {desc}[/dim]")
+            continue
+        
+        console.print(f"[cyan]Running:[/cyan] {cmd}")
+        stdout, stderr, code = run(cmd, desc, timeout=30)
+        
+        if code == 0:
+            console.print(f"[green]✓ {desc}[/green]")
+            success_count += 1
+        else:
+            console.print(f"[red]✗ {desc}: {stderr}[/red]")
+    
+    # Result
+    if success_count == len([c for _, c in commands if not c.startswith("#")]):
+        console.print(Panel("[bold green]MDM bypass completed![/bold green]",
+                           title="SUCCESS",
+                           border_style="green"))
+    else:
+        console.print(Panel("[bold yellow]Some steps failed - check output above[/bold yellow]",
+                           title="PARTIAL",
+                           border_style="yellow"))
+    
+    input("\nPress Enter to continue...")
+
+
 # ---------- Menus ----------
 def help_block(topic):
     HELP = {
@@ -1418,9 +1596,9 @@ def menu_mtk():
         )
         first_render = False
         c = input("Select: ").strip().lower()
-        if   c == "1": mtk_probe()
-        elif c == "2": mtk_write_single()
-        elif c == "3": break
+        if   c == "1": preflight()
+        elif c == "2": mtk_probe()
+        elif c == "3": mtk_write_single()
         elif c == "4": break
 
 class HiddenMenu:
@@ -1457,6 +1635,7 @@ class HiddenMenu:
             ("Advanced shell (root)", "Launch an interactive adb shell with su."),
             ("System backup (fastboot)", "Fetch boot/recovery/system/vendor/super via fastboot."),
             ("FRP Bypass", "Remove Factory Reset Protection (Samsung & Motorola)."),
+            ("MDM Bypass", "Remove Device Owner / MDM restrictions (enterprise devices)."),
             ("Back", "Return to the previous menu."),
         ]
         first_render = True
@@ -1464,7 +1643,7 @@ class HiddenMenu:
             draw("HIDDEN OPS", opts, first_render=first_render)
             first_render = False
             choice = input("Select: ").strip().lower()
-            if choice in {"4", "b", "q"}:
+            if choice in {"5", "b", "q"}:
                 break
             if choice == "1":
                 self.advanced_shell()
@@ -1472,6 +1651,8 @@ class HiddenMenu:
                 self.system_backup()
             elif choice == "3":
                 hack_frp_bypass()
+            elif choice == "4":
+                hack_mdm_bypass()
 
     def advanced_shell(self):
         """Interactive shell with root access"""
